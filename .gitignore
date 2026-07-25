@@ -1,0 +1,15 @@
+# Wardrobe backups exported from the app -- these contain your own photos
+# and wear history, so they should not be committed.
+*-backup.json
+rail-backup*.json
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# Claude Code local config
+.claude/
