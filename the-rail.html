@@ -69,7 +69,10 @@
   #app{max-width:560px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; position:relative;}
 
   header.top{
-    padding: 22px 20px 14px;
+    /* viewport-fit=cover plus a translucent status bar means the page really
+       does extend under the notch and the home indicator. Without these the
+       brand sits behind the clock on an installed app. */
+    padding: calc(22px + env(safe-area-inset-top, 0px)) 20px 14px;
     display:flex; align-items:baseline; justify-content:space-between;
     border-bottom:1px solid var(--line);
   }
@@ -106,7 +109,12 @@
   }
   .tab-ink.ready{opacity:1;}
 
-  main{flex:1; padding: 18px 16px 100px; overflow-y:auto; overscroll-behavior-y:contain;}
+  main{
+    flex:1; overflow-y:auto; overscroll-behavior-y:contain;
+    padding: 18px calc(16px + env(safe-area-inset-left, 0px))
+             calc(100px + env(safe-area-inset-bottom, 0px))
+             calc(16px + env(safe-area-inset-right, 0px));
+  }
 
   /* A view arrives from the side it lives on, so switching tabs feels like
      moving along a row rather than the screen being replaced. The stagger is
@@ -158,7 +166,25 @@
   .tag-card:nth-child(3n+2){--rot:-0.4deg;}
   .tag-card:active{transform:scale(0.97) rotate(var(--rot,0deg));}
 
-  .tag-string{ width:1px; height:14px; background:rgba(239,232,216,0.4); margin:0 auto; }
+  .grid-hint{
+    font-size:11.5px; color:rgba(239,232,216,0.42); margin:0 2px 12px;
+    display:flex; align-items:center; gap:6px;
+  }
+  /* A picked-up card leaves the grid's flow visually: bigger, lifted off the
+     page, and unrotated so it reads as being in your hand rather than on the
+     rail. The ones it displaces slide, which is the only way you can tell
+     where it will land. */
+  .grid.sortable .tag-card{touch-action:pan-y;}
+  /* No transform here on purpose: the carried card's transform is written
+     inline every frame, and a rule with !important would win against it and
+     pin the card in place. */
+  .tag-card.lifted{
+    z-index:30; position:relative;
+    filter:drop-shadow(0 16px 22px rgba(0,0,0,0.55));
+    transition:none;
+  }
+  .tag-card.shifting{transition:transform var(--settle);}
+  .grid.reordering{cursor:grabbing;}
   .tag-hole{
     width:8px;height:8px;border-radius:50%; background:var(--ink);
     border:1px solid rgba(239,232,216,0.4); margin:0 auto -5px; position:relative; z-index:2;
@@ -182,7 +208,8 @@
 
   /* ---- FAB ---- */
   .fab{
-    position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+    position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom, 0px));
+    transform:translateX(-50%);
     max-width:560px; width:calc(100% - 32px);
     display:flex; justify-content:flex-end; pointer-events:none; z-index:40;
   }
@@ -203,7 +230,8 @@
   .sheet-overlay.open{opacity:1; pointer-events:auto;}
   .sheet{
     background:var(--ink-2); width:100%; max-width:560px; margin:0 auto;
-    border-radius:20px 20px 0 0; padding:20px 20px 28px; max-height:88vh; overflow-y:auto;
+    border-radius:20px 20px 0 0; max-height:88vh; overflow-y:auto;
+    padding:20px 20px calc(28px + env(safe-area-inset-bottom, 0px));
     transform:translateY(100%); transition:transform var(--slide);
     border-top:1px solid var(--line);
     /* The sheet scrolls its own content; the page behind it should not
@@ -603,7 +631,7 @@
   @keyframes pulse{0%,80%,100%{opacity:0.25; transform:scale(0.8);}40%{opacity:1; transform:scale(1);}}
 
   .toast{
-    position:fixed; bottom:100px; left:50%; transform:translateX(-50%);
+    position:fixed; bottom:calc(100px + env(safe-area-inset-bottom, 0px)); left:50%; transform:translateX(-50%);
     background:var(--bone); color:var(--ink); padding:10px 18px; border-radius:24px;
     font-size:13px; font-weight:600; box-shadow:var(--shadow); z-index:60;
     opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
@@ -1209,6 +1237,7 @@ let state = {
   anchorId: null,
   activeOption: 0,
   swipeHintSeen: false,
+  reorderHintSeen: false,
   showGaps: false,
   gapResult: null,
   cutout: true,
@@ -1308,6 +1337,7 @@ async function loadAll(){
   const prefs   = await readJson('wardrobe:prefs', {});
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
+  if(prefs.reorderHintSeen) state.reorderHintSeen = true;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1330,7 +1360,11 @@ function saveItems(){   return saveKey('wardrobe:items',   state.items); }
 function saveOutfits(){ return saveKey('wardrobe:outfits', state.outfits); }
 function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
-function savePrefs(){   return saveKey('wardrobe:prefs',   {cutout: state.cutout, temp: state.temp}); }
+function savePrefs(){
+  return saveKey('wardrobe:prefs', {
+    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen
+  });
+}
 
 /* ============================================================
    BACKUP
@@ -3247,7 +3281,7 @@ function renderWardrobe(){
     return '<button class="chip '+(state.filter===c?'active':'')+'" data-filter="'+c+'">'+c+'</button>';
   }).join('')+'</div>';
 
-  const SORTS = [{v:'new',l:'Newest'},{v:'unworn',l:'Least worn'},{v:'name',l:'A–Z'}];
+  const SORTS = [{v:'mine',l:'My order'},{v:'new',l:'Newest'},{v:'unworn',l:'Least worn'},{v:'name',l:'A–Z'}];
   const sortHtml = '<div class="sort-row">'+SORTS.map(function(x){
     return '<button class="sort-btn '+(state.sort===x.v?'active':'')+'" data-sort="'+x.v+'">'+x.l+'</button>';
   }).join('')+'</div>';
@@ -3262,6 +3296,10 @@ function renderWardrobe(){
     });
   }else if(state.sort==='name'){
     filtered = filtered.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  }else if(state.sort==='mine'){
+    /* Your own arrangement is the order of the wardrobe itself, so dragging a
+       card writes it down rather than computing it. Nothing to sort here. */
+    filtered = filtered.slice();
   }else{
     filtered = filtered.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
   }
@@ -3269,7 +3307,11 @@ function renderWardrobe(){
   if(filtered.length===0){
     return searchHtml + filtersHtml + sortHtml + '<div class="empty" style="padding:40px 20px;">Nothing matches that.</div>';
   }
-  const gridHtml = '<div class="grid">'+filtered.map(renderTagCard).join('')+'</div>';
+  const dragHint = (filtered.length > 1 && !state.reorderHintSeen)
+    ? '<div class="grid-hint">Hold a piece to pick it up, then drag it where you want it.</div>'
+    : '';
+  const gridHtml = dragHint + '<div class="grid sortable">'
+    + filtered.map(renderTagCard).join('') + '</div>';
   return searchHtml + filtersHtml + sortHtml + gridHtml;
 }
 
@@ -5388,8 +5430,12 @@ function attachDynamicHandlers(){
     b.onclick = function(){ state.sort = b.dataset.sort; render(); };
   });
   document.querySelectorAll('.tag-card[data-id]').forEach(function(c){
-    c.onclick = function(){ openDetail(c.dataset.id); };
+    c.onclick = function(){
+      if(c.dataset.justDragged){ delete c.dataset.justDragged; return; }
+      openDetail(c.dataset.id);
+    };
   });
+  bindReorder();
   document.querySelectorAll('.rank-row[data-id]').forEach(function(c){
     c.onclick = function(){ openDetail(c.dataset.id); };
   });
@@ -5627,12 +5673,164 @@ document.querySelectorAll('nav.tabs button').forEach(function(b){
   b.onclick = function(){ state.tab = b.dataset.tab; render(); };
 });
 
+/* ---------- rearranging the rail by hand ----------
+   Tapping a piece opens it, so picking one up has to be a deliberate hold --
+   250ms without moving. Moving before that is a scroll, and the hold is
+   abandoned; otherwise the grid would steal every attempt to scroll past it.
+
+   The card being carried stays in the flow and is simply transformed to
+   follow the finger, and the cards it displaces are moved in the DOM as it
+   passes their centres. Their new positions are animated from their old ones
+   -- measure, move, then play the difference -- because a reflow alone jumps,
+   and a jump tells you nothing about where the thing you are holding will
+   land. */
+function bindReorder(){
+  const grid = document.querySelector('.grid.sortable');
+  if(!grid) return;
+
+  let card = null, holdTimer = null, startX = 0, startY = 0;
+  let originX = 0, originY = 0, lifted = false;
+
+  const cards = function(){
+    return Array.prototype.slice.call(grid.querySelectorAll('.tag-card'));
+  };
+
+  /* Measure, let the caller rearrange, then animate every card that moved
+     from where it was to where it now is. */
+  const withFlip = function(mutate){
+    const others = cards().filter(function(el){ return el !== card; });
+    const before = others.map(function(el){ return el.getBoundingClientRect(); });
+    mutate();
+    others.forEach(function(el, i){
+      const now = el.getBoundingClientRect();
+      const dx = before[i].left - now.left, dy = before[i].top - now.top;
+      if(!dx && !dy) return;
+      el.classList.remove('shifting');
+      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      void el.offsetWidth;
+      el.classList.add('shifting');
+      el.style.transform = '';
+    });
+  };
+
+  const lift = function(){
+    lifted = true;
+    /* Layout position, not the on-screen rect: offsetLeft ignores transforms,
+       so it stays a fixed reference while the card is being moved around by
+       one. */
+    originX = card.offsetLeft; originY = card.offsetTop;
+    card.classList.add('lifted');
+    grid.classList.add('reordering');
+    tick(10);
+  };
+
+  const follow = function(x, y){
+    card.style.transform = 'translate(' + (x - startX) + 'px,' + (y - startY) + 'px) scale(1.06)';
+
+    /* Whose slot is the finger over? Compare against the others' centres and
+       move the carried card there, so the gap is always where it will land. */
+    const others = cards().filter(function(el){ return el !== card; });
+    let target = null, best = Infinity;
+    others.forEach(function(el){
+      const r = el.getBoundingClientRect();
+      const d = Math.hypot(x - (r.left + r.width/2), y - (r.top + r.height/2));
+      if(d < best){ best = d; target = el; }
+    });
+    if(!target) return;
+    const tr = target.getBoundingClientRect();
+    if(best > tr.width * 0.75) return;          // not clearly over anything yet
+
+    const list = cards();
+    const from = list.indexOf(card), to = list.indexOf(target);
+    if(from === to) return;
+    withFlip(function(){
+      if(from < to) target.after(card);
+      else          target.before(card);
+    });
+    /* Its slot just moved underneath it. The transform is relative to that
+       slot, so the origin has to absorb the shift or the card would jump out
+       from under the finger. */
+    const shiftedX = card.offsetLeft - originX, shiftedY = card.offsetTop - originY;
+    startX += shiftedX; startY += shiftedY;
+    originX = card.offsetLeft; originY = card.offsetTop;
+    card.style.transform = 'translate(' + (x - startX) + 'px,' + (y - startY) + 'px) scale(1.06)';
+  };
+
+  const drop = async function(){
+    if(!lifted){ cleanup(); return; }
+    const order = cards().map(function(el){ return el.dataset.id; });
+    card.dataset.justDragged = '1';    /* the release must not open the piece */
+    cleanup();
+
+    /* Write the arrangement down: the visible cards, in their new order,
+       moved to where the first of them used to sit. Anything filtered out of
+       view keeps its place. */
+    const shown = {};
+    order.forEach(function(id){ shown[id] = true; });
+    const slots = [];
+    state.items.forEach(function(it, i){ if(shown[it.id]) slots.push(i); });
+    const byId = {};
+    state.items.forEach(function(it){ byId[it.id] = it; });
+    order.forEach(function(id, i){ if(slots[i] !== undefined) state.items[slots[i]] = byId[id]; });
+
+    state.reorderHintSeen = true;
+    /* Rearranging by hand while the view is sorted by name or date would be
+       undone the moment it re-sorts, so the act of arranging switches to your
+       own order. Anything else would silently throw the drag away. */
+    const wasComputed = state.sort !== 'mine';
+    if(wasComputed) state.sort = 'mine';
+    await saveItems();
+    await savePrefs();
+    render();
+    if(wasComputed) toast('Showing your own order');
+  };
+
+  const cleanup = function(){
+    clearTimeout(holdTimer);
+    if(card){
+      card.classList.remove('lifted');
+      card.style.transform = '';
+    }
+    cards().forEach(function(el){ el.classList.remove('shifting'); el.style.transform = ''; });
+    grid.classList.remove('reordering');
+    card = null; lifted = false;
+  };
+
+  grid.addEventListener('touchstart', function(e){
+    const c = e.target.closest && e.target.closest('.tag-card');
+    if(!c) return;
+    card = c;
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    lifted = false;
+    holdTimer = setTimeout(lift, 250);
+  }, {passive:true});
+
+  grid.addEventListener('touchmove', function(e){
+    if(!card) return;
+    const x = e.touches[0].clientX, y = e.touches[0].clientY;
+    if(!lifted){
+      /* Moved before the hold completed: this was a scroll all along. */
+      if(Math.hypot(x - startX, y - startY) > 8){ clearTimeout(holdTimer); card = null; }
+      return;
+    }
+    follow(x, y);
+  }, {passive:true});
+
+  grid.addEventListener('touchend', function(){ drop(); }, {passive:true});
+  grid.addEventListener('touchcancel', function(){ cleanup(); }, {passive:true});
+}
+
 /* ---------- sheets follow your thumb ----------
-   Every sheet already draws a handle at the top, which promises it can be
-   pulled down, and until now nothing happened when you did. The drag is
-   started from the handle, or from anywhere in a sheet that is scrolled to
-   the top -- so a sheet with a long form in it still scrolls normally, and
-   only a pull from the top edge dismisses it. */
+   Every sheet draws a handle at the top, which promises it can be pulled
+   down. The drag starts from that handle, or from anywhere in a sheet that
+   is already scrolled to the top.
+
+   The direction has to be decided before anything moves, and then left
+   alone. Deciding at touch-down instead meant a sheet sitting at the top
+   treated an upward swipe -- an attempt to read the rest of it -- as a
+   drag, and resisted it by a fifth of the travel. The settings sheet has
+   several hundred pixels below the fold; it simply could not be scrolled.
+   A gesture is a scroll or a drag, never both. */
 document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   const sheet = overlay.querySelector('.sheet');
   if(!sheet) return;
@@ -5643,28 +5841,43 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   const handleOnly = overlay.id === 'addOverlay';
 
   let y0 = null, t0 = 0, dy = 0, dragging = false, viaHandle = false;
+  let intent = null;      /* null = undecided, 'drag' = the sheet, 'scroll' = its content */
 
   sheet.addEventListener('touchstart', function(e){
     if(!overlay.classList.contains('open')) return;
     viaHandle = !!(e.target.closest && e.target.closest('.sheet-handle'));
     if(handleOnly && !viaHandle) return;
-    if(!viaHandle && sheet.scrollTop > 0) return;   // the content wants this gesture
-    y0 = e.touches[0].clientY; t0 = e.timeStamp; dy = 0; dragging = true;
-    sheet.classList.add('dragging');
-    if(viaHandle) sheet.classList.add('grabbed');
+    y0 = e.touches[0].clientY; t0 = e.timeStamp; dy = 0;
+    dragging = false;
+    /* The handle is not a scroller, so a grab there is a drag from the
+       start. Anywhere else waits to see which way the finger goes. */
+    intent = viaHandle ? 'drag' : null;
+    if(viaHandle){
+      dragging = true;
+      sheet.classList.add('dragging','grabbed');
+    }
   }, {passive:true});
 
   sheet.addEventListener('touchmove', function(e){
-    if(!dragging || y0===null) return;
+    if(y0 === null) return;
     const raw = e.touches[0].clientY - y0;
-    /* Upward has nowhere to go -- the sheet is already against the top --
-       so it resists rather than lifting off. */
-    dy = raw < 0 ? raw * 0.18 : raw;
-    if(dy > 0 && sheet.scrollTop > 0 && !viaHandle){
-      // content scrolled under the finger mid-drag; hand the gesture back
-      endDrag(true);
-      return;
+
+    if(intent === null){
+      if(Math.abs(raw) < 6) return;                 // too small to read yet
+      /* Downward, from the very top, with nothing above to scroll to: that
+         is a pull on the sheet. Everything else belongs to the content. */
+      intent = (raw > 0 && sheet.scrollTop <= 0) ? 'drag' : 'scroll';
+      if(intent === 'drag'){
+        dragging = true;
+        y0 = e.touches[0].clientY;                  // start from here, no jump
+        t0 = e.timeStamp;
+        sheet.classList.add('dragging');
+        return;
+      }
     }
+    if(intent !== 'drag') return;                   // hands off: the content is scrolling
+
+    dy = Math.max(0, e.touches[0].clientY - y0);    // never lift past the top
     sheet.style.transform = 'translateY(' + dy + 'px)';
     /* The backdrop lightens as the sheet leaves, so the page behind is
        already coming back before you let go. */
@@ -5672,8 +5885,8 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   }, {passive:true});
 
   function endDrag(cancel){
-    if(!dragging) return;
     dragging = false;
+    intent = null;
     sheet.classList.remove('dragging','grabbed');
     sheet.style.transform = '';
     overlay.style.opacity = '';
@@ -5682,7 +5895,7 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   }
 
   sheet.addEventListener('touchend', function(e){
-    if(!dragging || y0===null) return;
+    if(!dragging || y0===null){ endDrag(true); return; }
     const dt = Math.max(1, e.timeStamp - t0);
     const speed = dy / dt;                     // px per ms, downward positive
     const dismiss = dy > 110 || (speed > 0.5 && dy > 30);
