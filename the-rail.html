@@ -1437,48 +1437,181 @@ function cutOutBackground(canvas){
    Samples the subject, ignoring anything the cut-out marked as background
    and anything near the frame edge, weights toward the centre, then maps
    the winning cluster onto the palette in Lab space. */
+/* What is behind the garment?
+   A photographed garment sits inside the frame, so the outer band is nearly
+   always backdrop. Clustering that band gives us the handful of colours to
+   discount. This matters most for shoes and trousers, which cover little of
+   the frame -- without it a boot photographed on a wooden floor is read as
+   brown, because most of the pixels sampled genuinely are. */
+function estimateBackdrop(d, w, h){
+  const band = Math.max(2, Math.round(Math.min(w,h) * 0.05));
+  const step = Math.max(1, Math.round(Math.min(w,h) / 55));
+  const cent = [];
+  let total = 0;
+
+  const eat = function(x,y){
+    const p = (y*w + x) * 4;
+    const lab = rgbToLab(d[p], d[p+1], d[p+2]);
+    total++;
+    for(let i=0;i<cent.length;i++){
+      if(labDist(lab, cent[i].lab) < 16){          /* same surface, shaded */
+        const c = cent[i], n = c.n + 1;
+        c.lab = { L:(c.lab.L*c.n + lab.L)/n,
+                  a:(c.lab.a*c.n + lab.a)/n,
+                  b:(c.lab.b*c.n + lab.b)/n };
+        c.n = n;
+        return;
+      }
+    }
+    if(cent.length < 6) cent.push({lab:lab, n:1});
+  };
+
+  for(let x=0; x<w; x+=step){
+    for(let y=0; y<band; y+=step) eat(x,y);
+    for(let y=Math.max(band,h-band); y<h; y+=step) eat(x,y);
+  }
+  for(let y=band; y<h-band; y+=step){
+    for(let x=0; x<band; x+=step) eat(x,y);
+    for(let x=Math.max(band,w-band); x<w; x+=step) eat(x,y);
+  }
+
+  /* Keep only surfaces with real presence. A stray cluster from the garment
+     poking into the border must not become a rejection rule. */
+  return cent.filter(function(c){ return c.n / total > 0.10; })
+             .map(function(c){ return c.lab; });
+}
+
 function detectColors(canvas, mask){
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const d = ctx.getImageData(0,0,w,h).data;
 
-  const bucket = {};
-  COLORS.forEach(function(c){ bucket[c.name] = 0; });
-  let sampled = 0;
+  /* A real cutout mask is better evidence than anything we can infer, so only
+     guess at the backdrop when we were not handed one. */
+  const backdrop = mask ? [] : estimateBackdrop(d, w, h);
 
   const cx = w/2, cy = h/2;
   const maxR = Math.sqrt(cx*cx + cy*cy);
   const step = Math.max(1, Math.round(Math.min(w,h)/90));
 
-  for(let y=Math.floor(h*0.06); y<h*0.94; y+=step){
-    for(let x=Math.floor(w*0.06); x<w*0.94; x+=step){
-      const idx = y*w + x;
-      if(mask && mask[idx]) continue;              /* known background */
-      const p = idx*4;
-      const r = d[p], g = d[p+1], b = d[p+2];
+  /* Pass 1 discounts the backdrop. If that leaves too little to judge -- a
+     white shirt on a white sweep, where garment and surface are the same
+     colour -- pass 2 repeats without it rather than returning nothing.
+     Measuring what survives is the honest test: an earlier version instead
+     asked whether the backdrop colour also filled the centre of the frame,
+     which quietly inverted for small items, since the middle of a photo of a
+     shoe is mostly floor. */
+  let bucket, sampled, keptL, keptA, keptB;
+  for(let pass=0; pass<2; pass++){
+    keptL = []; keptA = []; keptB = [];
+    const reject = pass === 0 ? backdrop : [];
+    const informed = !!mask || reject.length > 0;
+    let candidates = 0;
+    bucket = {};
+    COLORS.forEach(function(c){ bucket[c.name] = 0; });
+    sampled = 0;
 
-      /* Skip paper-white and pure shadow: on a cut-out photo these are almost
-         always the backdrop bleeding in, not the garment. */
-      const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
-      if(mx > 244 && (mx-mn) < 12) continue;
-      if(mx < 14) continue;
+    for(let y=Math.floor(h*0.06); y<h*0.94; y+=step){
+      for(let x=Math.floor(w*0.06); x<w*0.94; x+=step){
+        const idx = y*w + x;
+        if(mask && mask[idx]) continue;              /* known background */
+        const p = idx*4;
+        const r = d[p], g = d[p+1], b = d[p+2];
 
-      const dist = Math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy));
-      const weight = 1.35 - 0.75*(dist/maxR);      /* centre counts for more */
+        /* Paper-white and pure shadow are usually backdrop bleeding in -- but
+           they are also a white shirt's highlights and a black boot's creases.
+           Only guess that broadly when we have nothing better; with a mask or a
+           backdrop model in hand, clip just true blowout and crushed black, or
+           we throw away one end of the garment's own range and read white as
+           cream and black as charcoal. */
+        if(!informed){
+          const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+          if(mx > 244 && (mx-mn) < 12) continue;
+          if(mx < 14) continue;
+        }
+        /* When the backdrop is known, these clips are not just unnecessary but
+           harmful: a white backdrop is already in the reject list, so the only
+           blown-out pixels left belong to the garment. Dropping them squeezes
+           a white shirt from above while the backdrop squeezes from below,
+           leaving nothing but midtones -- which is how white became grey. */
 
-      const lab = rgbToLab(r,g,b);
-      let best = null, bestD = Infinity;
-      for(let i=0;i<COLORS.length;i++){
-        const dd = labDist(lab, COLORS[i].lab);
-        if(dd < bestD){ bestD = dd; best = COLORS[i]; }
+        const lab = rgbToLab(r,g,b);
+        candidates++;
+
+        let isBack = false;
+        for(let i=0;i<reject.length;i++){
+          if(labDist(lab, reject[i]) < 15){ isBack = true; break; }
+        }
+        if(isBack) continue;
+
+        const dist = Math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy));
+        const weight = 1.35 - 0.75*(dist/maxR);      /* centre counts for more */
+
+        let best = null, bestD = Infinity;
+        for(let i=0;i<COLORS.length;i++){
+          const dd = labDist(lab, COLORS[i].lab);
+          if(dd < bestD){ bestD = dd; best = COLORS[i]; }
+        }
+        /* a pixel that matches nothing well shouldn't get a full vote */
+        const conf = bestD > 60 ? 0.35 : 1;
+        bucket[best.name] += weight * conf;
+        keptL.push(lab.L); keptA.push(lab.a); keptB.push(lab.b);
+        sampled++;
       }
-      /* a pixel that matches nothing well shouldn't get a full vote */
-      const conf = bestD > 60 ? 0.35 : 1;
-      bucket[best.name] += weight * conf;
-      sampled++;
     }
+    /* A garment can legitimately be a small part of its photo -- a shoe covers
+       barely a tenth of the frame -- so the bar is only that *something*
+       recognisable survived, not that most of the picture did. */
+    if(reject.length === 0) break;
+    if(sampled < 60 || sampled < candidates * 0.04) continue;
+
+    /* Survivor count alone cannot tell a small brown shoe on a white sweep
+       from a white shirt on the same sweep: both leave about a tenth of the
+       frame. Colour can. The shoe survives because it is a different material;
+       the shirt "survives" only as its own shadowed folds, which are the
+       backdrop's hue merely darker. So if what is left sits under the backdrop
+       in lightness while sharing its chroma, we subtracted the garment --
+       start over and keep everything. */
+    const mid = function(arr){
+      const s = arr.slice().sort(function(p,q){ return p-q; });
+      return s[Math.floor(s.length/2)];
+    };
+    const surv = {L:mid(keptL), a:mid(keptA), b:mid(keptB)};
+    let near = null, nearD = Infinity;
+    for(let i=0;i<reject.length;i++){
+      const dd = labDist(surv, reject[i]);
+      if(dd < nearD){ nearD = dd; near = reject[i]; }
+    }
+    if(near){
+      const chroma = Math.sqrt((surv.a-near.a)*(surv.a-near.a) + (surv.b-near.b)*(surv.b-near.b));
+      const drop = near.L - surv.L;
+      /* The band matters as much as the direction. Shadow falls just below the
+         surface casting it; a black garment on a white sweep is also neutral
+         and also darker, but by far more than shading can account for -- it is
+         a separate thing, not the same thing unlit. */
+      if(drop > 8 && drop < 30 && chroma < 12) continue;
+    }
+    break;
   }
   if(sampled < 20) return [];
+
+  /* Per-pixel voting splits a garment's shading ramp across neighbouring
+     palette entries -- a white shirt scatters votes over white, cream, silver
+     and grey, and whichever bin catches the most wins on a plurality that
+     means nothing. The median of the surviving pixels sits on the ramp itself
+     and is barely moved by either end, so classify that and let it carry the
+     decision, keeping the vote only to rank the alternatives. */
+  const med = function(arr){
+    const s = arr.slice().sort(function(p,q){ return p-q; });
+    return s[Math.floor(s.length/2)];
+  };
+  const centre = {L:med(keptL), a:med(keptA), b:med(keptB)};
+  let anchor = null, anchorD = Infinity;
+  for(let i=0;i<COLORS.length;i++){
+    const dd = labDist(centre, COLORS[i].lab);
+    if(dd < anchorD){ anchorD = dd; anchor = COLORS[i]; }
+  }
+  if(anchor && anchorD < 34) bucket[anchor.name] += sampled * 0.55;
 
   const ranked = Object.keys(bucket)
     .map(function(n){ return {name:n, score:bucket[n]/sampled}; })
