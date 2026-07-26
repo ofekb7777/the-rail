@@ -13,3 +13,7 @@ desktop.ini
 
 # Claude Code local config
 .claude/
+
+# Scratch harnesses used while tuning colour detection
+_gen.js
+_test.html
