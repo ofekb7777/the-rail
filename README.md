@@ -43,7 +43,7 @@ npx serve
 
 Settings → **Demo wardrobe** → *Add demo pieces* fills the rail with twenty
 garments and a month of wear history, so suggestions, planning, gap analysis
-and cost per wear all have something to work with immediately.
+and your rotation stats all have something to work with immediately.
 
 The pieces are drawn on a canvas when you ask for them rather than shipped as
 image files, so they cost nothing until used. They sit alongside anything of
