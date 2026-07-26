@@ -181,6 +181,7 @@
     border:1px solid rgba(27,33,48,0.3); border-radius:8px;
     padding:10px 14px; font-size:12.5px; font-weight:700; cursor:pointer;
   }
+  .wore-btn.danger{color:var(--thread); border-color:rgba(178,58,72,0.35);}
 
   .sort-row{display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;}
   .sort-btn{
@@ -203,11 +204,6 @@
   .today-head{padding:4px 2px 16px;}
   .t-greet{font-family:'Fraunces',serif; font-weight:500; font-style:italic; font-size:23px; letter-spacing:0.2px;}
   .t-weather{font-size:13px; color:rgba(239,232,216,0.62); margin-top:5px; letter-spacing:0.2px;}
-  .t-weather-add{
-    margin-top:7px; background:none; border:none; padding:0;
-    color:rgba(239,232,216,0.45); font-family:'Work Sans'; font-size:12.5px;
-    cursor:pointer; text-decoration:underline; text-underline-offset:3px;
-  }
   .btn-primary.big{padding:17px; font-size:15.5px; letter-spacing:0.2px;}
   .btn-quiet{
     display:block; width:100%; margin-top:10px; background:none; border:none;
@@ -464,6 +460,22 @@
     color:rgba(239,232,216,0.65); font-size:12.5px; cursor:pointer;
   }
   .occasion-chip.active{background:var(--sage); border-color:var(--sage); color:#101610;}
+  /* Warmth is a different kind of question from occasion, so the row reads
+     as its own choice rather than more of the same one. */
+  .temp-chips{margin-top:-6px;}
+  .temp-chip{font-size:12px; padding:6px 12px;}
+  .temp-chip.active{background:var(--mustard); border-color:var(--mustard); color:#2a2010;}
+  .dp-pickers{display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 2px;}
+  .dp-pick{
+    padding:5px 10px; border-radius:14px; border:1px solid var(--line); background:transparent;
+    color:rgba(239,232,216,0.6); font-family:'Work Sans'; font-size:11.5px; cursor:pointer;
+  }
+  .dp-pick.on{background:var(--sage); border-color:var(--sage); color:#101610;}
+  .dp-pick.temp.on{background:var(--mustard); border-color:var(--mustard); color:#2a2010;}
+  .dp-pick-lbl{
+    font-size:10px; text-transform:uppercase; letter-spacing:0.5px; font-weight:700;
+    color:rgba(239,232,216,0.38); width:100%; margin-bottom:-4px;
+  }
 
   .outfit-result{
     background:var(--bone); color:var(--ink); border-radius:14px; padding:18px; margin-top:16px;
@@ -729,10 +741,10 @@
 
 /* ============================================================
    THE RAIL — a fully offline wardrobe.
-   No API keys, no accounts, and no network calls except one
-   optional, key-free weather lookup. Every suggestion in this
-   app is computed locally from your own wardrobe and your own
-   wear history.
+   No API keys, no accounts, and nothing asked of a server about
+   your clothes. Every suggestion in this app is computed locally
+   from your own wardrobe and your own wear history; how cold it
+   is out is something you tell it.
    ============================================================ */
 
 /* ---------- palette ----------
@@ -1075,6 +1087,7 @@ let state = {
   sort: 'new',
   search: '',
   occasion: OCCASIONS[0],
+  temp: 'mild',     /* how cold it is out, as you judge it */
   lastResult: null,
   anchorId: null,
   activeOption: 0,
@@ -1084,9 +1097,9 @@ let state = {
   cutout: true,
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
+  planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
   builder: null,    /* {slots:{cat:itemId}, targetDate:null}  */
-  lastBackupAt: null,
-  weather: null
+  lastBackupAt: null
 };
 
 /* ============================================================
@@ -1177,6 +1190,7 @@ async function loadAll(){
   state.plans   = await readJson('wardrobe:plans', {});
   const prefs   = await readJson('wardrobe:prefs', {});
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
+  if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1188,14 +1202,6 @@ async function loadAll(){
   if(migrated) saveItems();
 
   render();
-
-  try{
-    const cached = await storageGet('wardrobe:weather');
-    if(cached){
-      const w = JSON.parse(cached);
-      if(w.date === todayKey()){ state.weather = w; render(); }
-    }
-  }catch(e){}
 }
 
 async function saveKey(key, value){
@@ -1207,7 +1213,7 @@ function saveItems(){   return saveKey('wardrobe:items',   state.items); }
 function saveOutfits(){ return saveKey('wardrobe:outfits', state.outfits); }
 function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
-function savePrefs(){   return saveKey('wardrobe:prefs',   {cutout: state.cutout}); }
+function savePrefs(){   return saveKey('wardrobe:prefs',   {cutout: state.cutout, temp: state.temp}); }
 
 /* ============================================================
    BACKUP
@@ -1218,7 +1224,7 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     items: state.items, outfits: state.outfits,
     wearLog: state.wearLog, plans: state.plans,
-    prefs: {cutout: state.cutout}
+    prefs: {cutout: state.cutout, temp: state.temp}
   };
   try{
     const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
@@ -1262,6 +1268,7 @@ async function importBackup(file, mode){
     });
   }
   if(data.prefs && typeof data.prefs.cutout === 'boolean') state.cutout = data.prefs.cutout;
+  if(data.prefs && data.prefs.temp) state.temp = tempBand(data.prefs.temp).v;
   state.items.forEach(enrichItem);
   await saveItems(); await saveOutfits(); await saveWearLog(); await savePlans(); await savePrefs();
 }
@@ -1720,72 +1727,23 @@ function clearImgCache(){
 }
 
 /* ============================================================
-   WEATHER — open-meteo, no key required. If location is denied
-   or the network blocks it we simply carry on without it.
-   ============================================================ */
-const WMO = {
-  0:'clear', 1:'mostly clear', 2:'partly cloudy', 3:'overcast',
-  45:'foggy', 48:'foggy', 51:'drizzle', 53:'drizzle', 55:'drizzle',
-  61:'rain', 63:'rain', 65:'heavy rain', 66:'freezing rain', 67:'freezing rain',
-  71:'snow', 73:'snow', 75:'heavy snow', 77:'snow',
-  80:'showers', 81:'showers', 82:'heavy showers',
-  85:'snow showers', 86:'snow showers', 95:'thunderstorm', 96:'thunderstorm', 99:'thunderstorm'
-};
-function weatherIcon(code){
-  if(code===0||code===1) return '☀';
-  if(code===2) return '⛅';
-  if(code===3||code===45||code===48) return '☁';
-  if(code>=71&&code<=77) return '❄';
-  if(code>=85&&code<=86) return '❄';
-  if(code>=95) return '⛈';
-  if(code>=51) return '☂';
-  return '☁';
-}
-function isWet(code){ return code>=51 && code<=99; }
+   HOW COLD IT IS — you tell the app, it does not ask a server
+   ============================================================
+   This used to be a forecast lookup, which meant a location prompt, a
+   network request and a reading that was only ever right for today: a look
+   planned for Friday was scored against Monday's weather. You know whether
+   it is cold out; the app does not need to find out on your behalf.
 
-function getPosition(){
-  return new Promise(function(resolve,reject){
-    if(!navigator.geolocation){ reject(new Error('no geo')); return; }
-    navigator.geolocation.getCurrentPosition(resolve, reject,
-      {timeout:8000, maximumAge:3600000, enableHighAccuracy:false});
-  });
-}
-
-async function loadWeather(force){
-  try{
-    const cached = await storageGet('wardrobe:weather');
-    if(cached && !force){
-      const w = JSON.parse(cached);
-      if(w.date === todayKey()){ state.weather = w; return w; }
-    }
-  }catch(e){}
-  try{
-    const pos = await getPosition();
-    const lat = pos.coords.latitude, lon = pos.coords.longitude;
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lat.toFixed(2)+'&longitude='+lon.toFixed(2)
-      + '&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1';
-    const r = await fetch(url);
-    if(!r.ok) throw new Error('weather http '+r.status);
-    const d = await r.json();
-    const w = {
-      date: todayKey(),
-      temp: Math.round(d.current.temperature_2m),
-      hi:   Math.round(d.daily.temperature_2m_max[0]),
-      lo:   Math.round(d.daily.temperature_2m_min[0]),
-      code: d.current.weather_code,
-      desc: WMO[d.current.weather_code] || 'mild'
-    };
-    state.weather = w;
-    storageSet('wardrobe:weather', JSON.stringify(w));
-    return w;
-  }catch(e){
-    return null;
-  }
-}
-function weatherLine(){
-  const w = state.weather;
-  if(!w) return null;
-  return weatherIcon(w.code)+' '+w.temp+'° · '+w.desc+' · high '+w.hi+'° low '+w.lo+'°';
+   The targets are warmth on the same 1-5 scale the garments carry, so cold
+   asks for layers and something over the top, and warm refuses them. */
+const TEMP_BANDS = [
+  {v:'cold', label:'Cold',  target:4.2, phrase:'the cold',   adj:'cold'},
+  {v:'mild', label:'Mild',  target:2.8, phrase:'a mild day', adj:'mild'},
+  {v:'warm', label:'Warm',  target:1.6, phrase:'the heat',   adj:'warm'}
+];
+function tempBand(v){
+  for(let i=0;i<TEMP_BANDS.length;i++){ if(TEMP_BANDS[i].v === v) return TEMP_BANDS[i]; }
+  return TEMP_BANDS[1];
 }
 
 /* ============================================================
@@ -1881,25 +1839,16 @@ function occasionProfile(occ){
   }
 }
 
-/* 28° wants a 1, freezing wants a 5, and everything in between slides. */
-function warmthTarget(temp){
-  if(temp === null || temp === undefined) return 2.8;
-  return clamp(5 - (temp+2)/7.5, 1, 5);
-}
-
 function styleContext(opts){
   opts = opts || {};
   const occ = opts.occasion || state.occasion;
   const prof = occasionProfile(occ);
-  const w = opts.weather !== undefined ? opts.weather : state.weather;
-  const temp = w ? w.temp : (opts.temp !== undefined ? opts.temp : null);
+  const band = tempBand(opts.temp !== undefined ? opts.temp : state.temp);
   return {
     occasion: occ,
     profile: prof,
-    temp: temp,
-    wet: w ? isWet(w.code) : false,
-    warmTarget: warmthTarget(temp),
-    hasWeather: !!w || opts.temp !== undefined,
+    band: band,
+    warmTarget: band.target,
     anchorId: opts.anchorId !== undefined ? opts.anchorId : state.anchorId,
     dateStr: opts.dateStr || todayKey()
   };
@@ -1997,15 +1946,12 @@ function warmthScore(items, ctx){
   const hasOuter = items.some(function(i){ return i.category==='outerwear'; });
   if(ctx.warmTarget >= 3.5 && !hasOuter) s -= 1.5;
   if(ctx.warmTarget <= 1.8 && hasOuter)  s -= 2.0;
-  if(ctx.wet){
-    const dry = items.some(function(i){ return (i.tags||[]).indexOf('rain') > -1; });
-    s += dry ? 1.2 : -0.8;
-  }
-  /* with no weather reading we shouldn't pretend to have a strong opinion */
-  if(!ctx.hasWeather) s = 2.6 + (s-2.6)*0.35;
+  /* The band is always a deliberate answer, so warmth is scored at full
+     strength -- the old code halved its own opinion because a forecast
+     might have been missing. */
 
-  /* A knit jumper with shorts is incoherent whatever the forecast says, so
-     this one applies even when we have no temperature to check against. */
+  /* A knit jumper with shorts is incoherent whatever the weather, so this
+     one applies regardless of which band you picked. */
   const layers = body.filter(function(i){ return i.category!=='outerwear'; })
                      .map(function(i){ return i.warmth; });
   let spread = 0;
@@ -2139,7 +2085,7 @@ function generateLooks(opts){
     paths.push([]);
   }
 
-  const needOuter = (ctx.warmTarget >= 3.4 || ctx.wet) && has('outerwear');
+  const needOuter = ctx.warmTarget >= 3.4 && has('outerwear');
   const candidates = [];
 
   paths.forEach(function(base){
@@ -2319,10 +2265,10 @@ function titleFor(items, score, ctx){
     default:
       bank = ['Quiet neutrals', 'Easy and unfussy', 'Reliable']; break;
   }
-  if(score.warmth.hasOuter && ctx.temp !== null && ctx.temp <= 8){
-    bank = bank.concat(['Layered for '+ctx.temp+'°', 'Built for the cold']);
+  if(score.warmth.hasOuter && ctx.band.v === 'cold'){
+    bank = bank.concat(['Layered for the cold', 'Built for the cold']);
   }
-  if(ctx.wet) bank = bank.concat(['Dressed for the rain']);
+  if(ctx.band.v === 'warm') bank = bank.concat(['Light enough for the heat']);
   if(ctx.occasion === 'Work' && score.formality.mean >= 4) bank = bank.concat(['Sharp enough for the room']);
   return seededPick(bank, seed);
 }
@@ -2364,26 +2310,21 @@ function describeLook(items, score, ctx){
     lines.push('On the relaxed side for '+ctx.occasion.toLowerCase()+' — swap the shoes up if you want more polish.');
   }
 
-  /* 3 — weather, but only if we actually know it, and only honestly:
-         if the warmth score came out poor, say that instead of bluffing */
-  if(ctx.hasWeather && ctx.temp !== null){
+  /* 3 — warmth, against the band you picked, and honestly: if the warmth
+         score came out poor, say so rather than bluffing */
+  {
     const outer = items.find(function(i){ return i.category==='outerwear'; });
     const warmOK = score.warmth.score >= 3;
-    if(ctx.wet){
-      const dry = items.find(function(i){ return (i.tags||[]).indexOf('rain')>-1; });
-      if(dry)        lines.push('Rain cover: the '+dry.name.toLowerCase()+'.');
-      else if(outer) lines.push('It is wet out — the '+outer.name.toLowerCase()+' will cope, though nothing here is properly waterproof.');
-      else           lines.push('It is wet out, and there is no waterproof layer in this one.');
-    }else if(!warmOK){
+    if(!warmOK){
       lines.push(score.warmth.mean > ctx.warmTarget
-        ? 'Fair warning — this runs warm for '+ctx.temp+'°.'
-        : 'This runs light for '+ctx.temp+'° — worth putting something over it.');
-    }else if(outer && ctx.temp <= 12){
-      lines.push('At '+ctx.temp+'°, the heavy lifting is done by the '+outer.name.toLowerCase()+'.');
-    }else if(ctx.temp >= 24){
-      lines.push('Light enough for '+ctx.temp+'°.');
+        ? 'Fair warning — this runs warm for '+ctx.band.phrase+'.'
+        : 'This runs light for '+ctx.band.phrase+' — worth putting something over it.');
+    }else if(outer && ctx.band.v === 'cold'){
+      lines.push('In the cold, the heavy lifting is done by the '+outer.name.toLowerCase()+'.');
+    }else if(ctx.band.v === 'warm'){
+      lines.push('Light enough for the heat.');
     }else{
-      lines.push('Comfortable at '+ctx.temp+'°.');
+      lines.push('Comfortable for '+ctx.band.phrase+'.');
     }
   }
 
@@ -2406,7 +2347,7 @@ function scorePills(score, ctx){
   const grade = function(v){ return v >= 3.8 ? 'good' : (v >= 2.6 ? '' : 'warn'); };
   p.push({cls:grade(score.colour.score),    text: score.colour.rule});
   p.push({cls:grade(score.formality.score), text: ctx.occasion + '-ready'});
-  if(ctx.hasWeather) p.push({cls:grade(score.warmth.score), text: ctx.temp+'° ✓'});
+  p.push({cls:grade(score.warmth.score), text: ctx.band.label+'-ready'});
   if(score.rotation.score >= 3.4) p.push({cls:'good', text:'Fresh rotation'});
   else if(score.rotation.score < 2)  p.push({cls:'warn', text:'Worn recently'});
   if(score.affinity.pairs >= 2) p.push({cls:'good', text:'Proven pairing'});
@@ -2586,8 +2527,8 @@ function countGoodLooks(extra){
 /* Can this wardrobe actually dress you for a given occasion and temperature?
    Runs the real stylist and checks the result is complete, not just present. */
 function coverageCheck(occasion, temp){
-  const ctx = styleContext({occasion:occasion, temp:temp, weather:null, anchorId:null});
-  const looks = generateLooks({occasion:occasion, temp:temp, weather:null, anchorId:null, count:1});
+  const ctx = styleContext({occasion:occasion, temp:temp, anchorId:null});
+  const looks = generateLooks({occasion:occasion, temp:temp, anchorId:null, count:1});
   if(!looks.length) return {ok:false, missing:'anything wearable', occasion:occasion, temp:temp};
 
   const items = looks[0].itemIds.map(function(id){
@@ -2597,7 +2538,7 @@ function coverageCheck(occasion, temp){
   const cats = items.map(function(i){ return i.category; });
   const hasBase = (cats.indexOf('top')>-1 && cats.indexOf('bottom')>-1) || cats.indexOf('dress')>-1;
   const hasShoes = cats.indexOf('footwear')>-1;
-  const needOuter = warmthTarget(temp) >= 3.4;
+  const needOuter = tempBand(temp).target >= 3.4;
   const hasOuter = cats.indexOf('outerwear')>-1;
 
   if(!hasBase)  return {ok:false, missing:'a top and a bottom', occasion:occasion, temp:temp};
@@ -2686,7 +2627,7 @@ function analyseGaps(){
   /* 1. hard coverage failures carry the most weight */
   const scenarios = [];
   OCCASIONS.forEach(function(o){
-    [3, 16, 27].forEach(function(t){ scenarios.push(coverageCheck(o, t)); });
+    TEMP_BANDS.forEach(function(b){ scenarios.push(coverageCheck(o, b.v)); });
   });
   const failures = scenarios.filter(function(s){ return !s.ok; });
 
@@ -2795,7 +2736,7 @@ function analyseGaps(){
     const k = fl.occasion+'|'+fl.missing;
     if(seenMiss[k]) return;
     seenMiss[k] = true;
-    const when = fl.temp<=5 ? 'in cold weather' : (fl.temp>=25 ? 'in hot weather' : '');
+    const when = fl.temp==='cold' ? 'in the cold' : (fl.temp==='warm' ? 'in the heat' : '');
     blockers.push('You cannot put together a '+fl.occasion.toLowerCase()+' outfit '+(when?when+' ':'')+'— missing '+fl.missing+'.');
   });
 
@@ -3047,14 +2988,12 @@ function renderToday(){
 
   const disabled = state.items.length < 2;
   const anchorItem = state.anchorId ? state.items.find(function(i){ return i.id===state.anchorId; }) : null;
-  const wl = weatherLine();
   const wornToday = wearsOn(todayKey());
   const plannedToday = state.plans[todayKey()];
 
   const header = '<div class="today-head">'
     + '<div class="t-greet">'+greeting()+'</div>'
-    + (wl ? '<div class="t-weather">'+wl+'</div>'
-          : '<button class="t-weather-add" id="enableWeatherBtn">＋ Use my weather</button>')
+    + '<div class="t-weather">Dressing for '+tempBand(state.temp).phrase+'</div>'
     + '</div>';
 
   const anchorHtml = anchorItem
@@ -3069,6 +3008,9 @@ function renderToday(){
     + anchorHtml
     + '<div class="occasion-chips">'+OCCASIONS.map(function(o){
         return '<button class="occasion-chip '+(state.occasion===o?'active':'')+'" data-occ="'+o+'">'+o+'</button>';
+      }).join('')+'</div>'
+    + '<div class="occasion-chips temp-chips">'+TEMP_BANDS.map(function(b){
+        return '<button class="occasion-chip temp-chip '+(state.temp===b.v?'active':'')+'" data-temp="'+b.v+'">'+b.label+'</button>';
       }).join('')+'</div>'
     + '<button class="btn-primary big" id="getOutfitBtn" '+(disabled?'disabled':'')+'>'
     +   (anchorItem ? 'Build around this piece' : 'What should I wear?')
@@ -3170,7 +3112,7 @@ function renderLookbook(outfit, allowSwap){
   return '<div class="lookbook">'+cells+'</div>'+swatches;
 }
 
-function renderOutfitResult(outfit, saved){
+function renderOutfitResult(outfit, saved, savedIdx){
   let badge = '';
   if(outfit.harmonyRule){
     const items = outfit.itemIds.map(function(id){ return state.items.find(function(i){ return i.id===id; }); }).filter(Boolean);
@@ -3207,6 +3149,9 @@ function renderOutfitResult(outfit, saved){
         ? '<div class="saved-flag">✓ Saved to your looks</div>'
           + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>'
+          + (savedIdx !== undefined
+              ? '<button class="wore-btn danger" data-unsave="'+savedIdx+'" data-unsave-ids="'+outfit.itemIds.join(',')+'">Remove</button>'
+              : '')
         : '<button class="save-outfit-btn" id="saveOutfitBtn">Save this look</button>'
           + '<button class="wore-btn" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>')
@@ -3234,7 +3179,11 @@ function renderSaved(){
   if(state.outfits.length===0){
     return '<div class="empty"><span class="mark">Nothing saved yet</span>Looks you save from Today will show up here.</div>';
   }
-  return state.outfits.slice().reverse().map(function(o){ return renderOutfitResult(o, true); }).join('');
+  /* Reversed for display, so the index handed to the remove button is the
+     one in the real array, not the one on screen. */
+  return state.outfits.slice().reverse().map(function(o, i){
+    return renderOutfitResult(o, true, state.outfits.length - 1 - i);
+  }).join('');
 }
 
 function renderGapResult(){
@@ -3281,6 +3230,9 @@ function calMonth(){
 function shiftMonth(delta){
   const m = calMonth();
   state.calMonth = new Date(m.getFullYear(), m.getMonth()+delta, 1);
+  /* Terms chosen for a day you have navigated away from are not terms for
+     whatever day you land on next. */
+  state.planDraft = null;
   render();
 }
 
@@ -3392,6 +3344,24 @@ function renderDayPanel(){
       + '</div>';
   }
 
+  /* A day you are planning for chooses its own occasion and warmth. Without
+     this, the only way to plan Friday drinks was to go to Today, switch the
+     occasion, come back, and remember to switch it again afterwards. */
+  let pickers = '';
+  if(!isPast && (!entry || entry.kind === 'plan')){
+    const set = planSettings(key);
+    pickers = '<div class="dp-pickers"><span class="dp-pick-lbl">For</span>'
+      + OCCASIONS.map(function(o){
+          return '<button class="dp-pick '+(set.occasion===o?'on':'')+'" data-day-occ="'+o+'">'+o+'</button>';
+        }).join('')
+      + '</div>'
+      + '<div class="dp-pickers"><span class="dp-pick-lbl">Weather</span>'
+      + TEMP_BANDS.map(function(b){
+          return '<button class="dp-pick temp '+(set.temp===b.v?'on':'')+'" data-day-temp="'+b.v+'">'+b.label+'</button>';
+        }).join('')
+      + '</div>';
+  }
+
   const actions = [];
   if(entry && entry.kind==='plan'){
     if(isToday) actions.push('<button class="dp-btn primary" data-wore="'+entry.itemIds.join(',')+'" data-wore-title="'+escapeHtml(entry.title||'')+'">I wore this</button>');
@@ -3408,24 +3378,42 @@ function renderDayPanel(){
   return '<div class="day-panel">'
     + '<div class="dp-head"><div class="dp-date">'+label+'</div>'+tag+'</div>'
     + body
+    + pickers
     + '<div class="dp-actions">'+actions.join('')+'</div>'
     + '</div>';
 }
 
-/* A suggestion for a specific day. We only claim to know the weather for
-   dates close enough that today's reading is still meaningful. */
-function suggestForDay(key){
-  const daysOut = Math.round((parseKey(key).getTime() - parseKey(todayKey()).getTime())/86400000);
-  const useWeather = Math.abs(daysOut) <= 2 ? state.weather : null;
+/* A suggestion for a specific day, on that day's own terms. A plan used to
+   be built from whatever occasion happened to be selected on Today, so
+   planning Friday drinks on a Monday morning quietly produced a work
+   outfit. Each day now remembers what it is for and how cold it will be,
+   and re-suggesting keeps those rather than resetting them. */
+function planSettings(key){
+  const p = state.plans[key];
+  const d = (state.planDraft && state.planDraft.key === key) ? state.planDraft : null;
+  return {
+    occasion: (p && p.occasion) || (d && d.occasion) || state.occasion,
+    temp:     (p && p.temp)     || (d && d.temp)     || state.temp
+  };
+}
+
+function suggestForDay(key, override){
+  const set = Object.assign(planSettings(key), override || {});
   const looks = generateLooks({
-    occasion: state.occasion,
-    weather: useWeather,
+    occasion: set.occasion,
+    temp: set.temp,
     anchorId: null,
     dateStr: key,
     count: 1
   });
   if(!looks.length){ toast('Not enough pieces to build a look'); return; }
-  state.plans[key] = {itemIds: looks[0].itemIds, title: looks[0].title, createdAt: Date.now()};
+  state.plans[key] = {
+    itemIds: looks[0].itemIds,
+    title: looks[0].title,
+    occasion: set.occasion,
+    temp: set.temp,
+    createdAt: Date.now()
+  };
   savePlans();
   render();
   toast('Planned for '+parseKey(key).getDate()+' '+MONTHS[parseKey(key).getMonth()].slice(0,3));
@@ -3583,9 +3571,9 @@ function builderVerdict(items){
   const axes = [
     {v:score.colour.score,    msg:'The colours are the weak point: '+score.colour.rule.toLowerCase()+' across '+score.colour.distinct.length+' colour'+(score.colour.distinct.length===1?'':'s')+'.'},
     {v:score.formality.score, msg:'These sit at different levels of formality — a spread of '+score.formality.range.toFixed(1)+' points.'},
-    {v:score.warmth.score,    msg: ctx.hasWeather
-        ? 'Not quite right for '+ctx.temp+'°.'
-        : (score.warmth.spread > 1.6 ? 'The layers disagree about the season.' : 'Turn on weather for a proper read on warmth.')}
+    {v:score.warmth.score,    msg: score.warmth.spread > 1.6
+        ? 'The layers disagree about the season.'
+        : 'Not quite right for '+ctx.band.phrase+'.'}
   ].sort(function(a,b){ return a.v-b.v; });
 
   let title;
@@ -3954,7 +3942,7 @@ function openDetail(id){
     +     '<label class="field"><span>Warmth</span><select id="editWarmth">'+levelOptions(WARMTH_WORDS, item.warmth||3)+'</select></label>'
     +     '<label class="field"><span>Formality</span><select id="editFormality">'+levelOptions(FORMAL_WORDS, item.formality||3)+'</select></label>'
     +   '</div>'
-    +   '<div class="sb-stat" style="margin:-6px 0 12px;">These two drive every weather and occasion decision the stylist makes. They are guessed from the name — correct them if they look wrong.</div>'
+    +   '<div class="sb-stat" style="margin:-6px 0 12px;">These two drive every warmth and occasion decision the stylist makes. They are guessed from the name — correct them if they look wrong.</div>'
     +   '<button class="btn-primary" id="saveEditBtn">Save changes</button>'
     + '</div>'
     + '<button class="btn-secondary btn-danger" id="deleteItemBtn">Remove from wardrobe</button>'
@@ -4703,7 +4691,7 @@ function renderSettingsBody(){
     +     'Colours are measured directly off your photos, categories come from a keyword dictionary, '
     +     'and outfits are scored on colour harmony, formality, warmth, how recently you wore things, '
     +     'and which pieces you have worn together before. '
-    +     'The only network request it ever makes is an optional weather lookup, which needs no key.'
+    +     'It asks no server anything about your clothes; the only thing it fetches is the web font it is set in.'
     +   '</div>'
     +   '<div class="sb-stat">Right now: '+countGoodLooks(null)+' workable combinations from '+stats.count+' pieces.</div>'
     + '</div>'
@@ -4870,23 +4858,65 @@ function attachDynamicHandlers(){
   document.querySelectorAll('.rank-row[data-id]').forEach(function(c){
     c.onclick = function(){ openDetail(c.dataset.id); };
   });
-  document.querySelectorAll('.occasion-chip').forEach(function(b){
+  document.querySelectorAll('[data-occ]').forEach(function(b){
     b.onclick = function(){
       state.occasion = b.dataset.occ;
       state.lastResult = null;
       render();
     };
   });
-  document.querySelectorAll('[data-swap]').forEach(function(el){
-    el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
+  document.querySelectorAll('[data-temp]').forEach(function(b){
+    b.onclick = async function(){
+      state.temp = b.dataset.temp;
+      state.lastResult = null;    /* the looks on screen were scored for the old band */
+      await savePrefs();
+      render();
+    };
   });
 
-  on('enableWeatherBtn', async function(){
-    const btn = document.getElementById('enableWeatherBtn');
-    btn.textContent = 'Checking…';
-    const w = await loadWeather(true);
-    if(!w) toast('Could not get weather — location may be blocked');
-    render();
+  /* Planning for a day sets that day's terms, and re-suggests immediately if
+     it already had a plan -- changing "Work" to "Going out" and then having
+     to find the Suggest button again is a step nobody wants. */
+  const setDayTerm = function(field, value){
+    const key = state.calSelected;
+    if(!key) return;
+    if(state.plans[key]){
+      const o = {}; o[field] = value;
+      suggestForDay(key, o);          /* it already has a plan: re-suggest on the new terms */
+    }else{
+      const cur = planSettings(key);
+      state.planDraft = {key: key, occasion: cur.occasion, temp: cur.temp};
+      state.planDraft[field] = value;
+      render();
+    }
+  };
+  document.querySelectorAll('[data-day-occ]').forEach(function(b){
+    b.onclick = function(){ setDayTerm('occasion', b.dataset.dayOcc); };
+  });
+  document.querySelectorAll('[data-day-temp]').forEach(function(b){
+    b.onclick = function(){ setDayTerm('temp', b.dataset.dayTemp); };
+  });
+
+  /* Saved looks could only ever accumulate. */
+  document.querySelectorAll('[data-unsave]').forEach(function(b){
+    b.onclick = async function(){
+      const idx = parseInt(b.dataset.unsave, 10);
+      const ids = b.dataset.unsaveIds || '';
+      let at = idx;
+      /* the index comes from a reversed list, so check it really is the look
+         on screen before removing anything */
+      if(!state.outfits[at] || (state.outfits[at].itemIds||[]).join(',') !== ids){
+        at = state.outfits.findIndex(function(o){ return (o.itemIds||[]).join(',') === ids; });
+      }
+      if(at < 0) return;
+      state.outfits.splice(at, 1);
+      await saveOutfits();
+      render();
+      toast('Removed from your looks');
+    };
+  });
+  document.querySelectorAll('[data-swap]').forEach(function(el){
+    el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
   });
 
   on('toggleGaps', function(){
@@ -4926,7 +4956,7 @@ function attachDynamicHandlers(){
   on('calPrev', function(){ shiftMonth(-1); });
   on('calNext', function(){ shiftMonth(1); });
   document.querySelectorAll('.cal-cell[data-day]').forEach(function(c){
-    c.onclick = function(){ state.calSelected = c.dataset.day; render(); };
+    c.onclick = function(){ state.calSelected = c.dataset.day; state.planDraft = null; render(); };
   });
   on('dpSuggest', function(){ suggestForDay(state.calSelected); });
   on('dpBuild', function(){ openBuilder({dateStr: state.calSelected}); });
