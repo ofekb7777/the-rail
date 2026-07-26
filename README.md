@@ -15,9 +15,10 @@ runs in your browser. Nothing about your wardrobe ever leaves your device.
 
 **Just open `the-rail.html`.** Double-click it. That works.
 
-There is one reason to prefer a local server: browsers only grant geolocation
-and service workers to *secure* origins, and `file://` is not one. So if you
-want the weather lookup to work, serve it over `http://localhost` instead.
+There is one reason to prefer a local server: browsers only grant service
+workers to *secure* origins, and `file://` is not one. So if you want the app
+to keep working offline once it has been opened, serve it over
+`http://localhost` instead.
 
 If you have Git for Windows, you already have everything needed — it bundles
 Perl:
@@ -43,7 +44,7 @@ npx serve
 
 Settings → **Demo wardrobe** → *Add demo pieces* fills the rail with twenty
 garments and a month of wear history, so suggestions, planning, gap analysis
-and cost per wear all have something to work with immediately.
+and your rotation stats all have something to work with immediately.
 
 The pieces are drawn on a canvas when you ask for them rather than shipped as
 image files, so they cost nothing until used. They sit alongside anything of
@@ -97,16 +98,17 @@ wear history stay in your browser's storage and are never uploaded anywhere.
 
 ## What talks to the network
 
-Four external references, and no API key for any of them:
+Three external references, no API key for any of them, and nothing that is
+told anything about your wardrobe:
 
 | What | Why | If it fails |
 |---|---|---|
 | `fonts.googleapis.com` | Fraunces + Work Sans | Falls back to system fonts |
-| `api.open-meteo.com` | Weather for the daily suggestion | Suggestions ignore weather |
 | `pinterest.com`, `google.com` | Outbound "find similar" links | — |
 
-Open-Meteo is free and keyless. Offline, the app works fully except that it
-stops factoring temperature into what it recommends.
+Nothing is fetched to make a suggestion. How cold it is out is a choice you
+make on the Today tab — Cold, Mild or Warm — rather than something the app
+asks a weather service about behind your back.
 
 ## How the suggestions work
 
@@ -115,8 +117,8 @@ There is no language model here. Outfits are scored on five axes:
 - **Colour harmony** — pairwise distance in CIE-Lab, matched against
   complementary / analogous / triadic / neutral-anchor / monochrome rules
 - **Formality** — inferred per garment, then penalised for spread within a look
-- **Warmth** — garment-by-garment insulation against the forecast, with
-  footwear weighted separately from body layers
+- **Warmth** — garment-by-garment insulation against the band you picked
+  (Cold / Mild / Warm), with footwear weighted separately from body layers
 - **Rotation** — favours things you have not worn lately
 - **Affinity** — learns which pieces you actually wear together
 
