@@ -50,13 +50,32 @@ wear history that came with them, leaving your own things untouched.
 ## On your phone
 
 The layout is built for a phone first; the desktop view is the afterthought.
+The camera button opens the rear camera directly.
 
 To try it over your local network, run the server above, find this machine's
 LAN address with `ipconfig`, and open `http://<that-address>:8000/` on a phone
 connected to the same Wi-Fi.
 
-In Safari or Chrome, **Add to Home Screen** gives you a genuine fullscreen app
-with no browser chrome. The camera button opens the rear camera directly.
+### Installing it to the home screen
+
+Open the deployed page and choose **Add to Home Screen** — Share menu in
+Safari, the ⋮ menu in Chrome. You get a fullscreen app with its own icon and
+no browser chrome.
+
+Two things have to be true for that to be a real install rather than a
+bookmark, and both are why a deployed URL matters more than it looks:
+
+- **It must be the top-level page.** A manifest is ignored inside an iframe, so
+  installing from a page that embeds this app captures the wrapper instead.
+- **It should be served over https** (or localhost). The service worker only
+  registers on a real origin, and without it the icon opens to a network error
+  the first time you are underground.
+
+With both in place the app opens with no signal at all: `sw.js` caches the
+page on first visit and serves it when the network is gone. It is network
+first, so edits still appear immediately when you do have a connection.
+
+Opened straight from disk, the worker is skipped — the file is already local.
 
 > **Your wardrobe lives on the device that created it.** Storage is IndexedDB,
 > which is per-browser and per-device — so your phone and your laptop keep

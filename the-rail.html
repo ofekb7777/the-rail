@@ -5124,8 +5124,25 @@ function installHomeScreen(){
   }
 }
 
+/* Registered only from a real origin. Opened as a file:// path there is no
+   worker to register and no need for one -- the file is already local. It is
+   also skipped inside a frame, where an embedded copy has no business
+   installing a worker over the whole origin. */
+function installOfflineWorker(){
+  if(!('serviceWorker' in navigator)) return;
+  if(location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  if(window.top !== window.self) return;
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(e){
+      /* Nothing here is load-bearing: without it the app just needs a network. */
+      console.warn('offline worker not registered', e && e.message);
+    });
+  });
+}
+
 /* ---------- init ---------- */
 installHomeScreen();
+installOfflineWorker();
 loadAll();
 
 </script>
