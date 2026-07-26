@@ -1478,6 +1478,38 @@ function drawToCanvas(img, maxDim){
    close to the border colour. Deliberately conservative: if the border
    is busy, or the fill eats most or almost none of the frame, we leave
    the photo exactly as it was. A wrong cut-out is worse than none. */
+/* Largest connected run of pixels the fill did NOT claim, with its bounding
+   box. Two jobs: proving a subject exists at all, and describing its shape so
+   the category can be guessed from it. Iterative, because a garment is tens of
+   thousands of pixels and recursion would blow the stack. */
+function largestSurvivor(seen, w, h){
+  const label = new Uint8Array(w*h);
+  let best = {area:0, x0:0, y0:0, x1:0, y1:0};
+  const stack = [];
+  for(let start=0; start<w*h; start++){
+    if(seen[start] || label[start]) continue;
+    let area = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+    stack.length = 0;
+    stack.push(start);
+    label[start] = 1;
+    while(stack.length){
+      const idx = stack.pop();
+      const x = idx % w, y = (idx - x)/w;
+      area++;
+      if(x<x0) x0=x;
+      if(x>x1) x1=x;
+      if(y<y0) y0=y;
+      if(y>y1) y1=y;
+      if(x>0   && !seen[idx-1] && !label[idx-1]){ label[idx-1]=1; stack.push(idx-1); }
+      if(x<w-1 && !seen[idx+1] && !label[idx+1]){ label[idx+1]=1; stack.push(idx+1); }
+      if(y>0   && !seen[idx-w] && !label[idx-w]){ label[idx-w]=1; stack.push(idx-w); }
+      if(y<h-1 && !seen[idx+w] && !label[idx+w]){ label[idx+w]=1; stack.push(idx+w); }
+    }
+    if(area > best.area) best = {area:area, x0:x0, y0:y0, x1:x1, y1:y1};
+  }
+  return best;
+}
+
 function cutOutBackground(canvas){
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
@@ -1537,7 +1569,16 @@ function cutOutBackground(canvas){
 
   const frac = cleared/(w*h);
   if(frac < 0.10) return {applied:false, reason:'nothing to remove'};
-  if(frac > 0.90) return {applied:false, reason:'no subject found'};
+
+  /* What is left has to be a *thing*, not a scattering of specks -- but "a
+     thing" is not the same as "most of the frame". A boot fills a tenth of its
+     photo and a ring far less, so judging by cleared area alone threw away
+     exactly the small items this is most useful for: anything under about an
+     eighth of the frame was refused as "no subject found" however cleanly it
+     had been isolated. Measure the largest surviving island instead -- that is
+     the garment -- and let it be as small as a real garment can be. */
+  const blob = largestSurvivor(seen, w, h);
+  if(blob.area/(w*h) < 0.012) return {applied:false, reason:'no subject found'};
 
   /* 3. paint the background white, softening the boundary by one pixel so
         the garment does not end up with a hard aliased edge */
@@ -1559,7 +1600,15 @@ function cutOutBackground(canvas){
     }
   }
   ctx.putImageData(img,0,0);
-  return {applied:true, mask:seen, coverage:1-frac};
+  return {
+    applied:true, mask:seen, coverage:1-frac,
+    shape:{
+      area: blob.area/(w*h),
+      aspect: (blob.y1-blob.y0+1) / Math.max(1, blob.x1-blob.x0+1),
+      midY: ((blob.y0+blob.y1)/2) / h,
+      fill: blob.area / Math.max(1, (blob.x1-blob.x0+1)*(blob.y1-blob.y0+1))
+    }
+  };
 }
 
 /* ---------- dominant colour ----------
