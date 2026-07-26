@@ -351,7 +351,18 @@
     display:inline-block; font-size:11.5px; font-weight:700; color:var(--sage);
     letter-spacing:0.3px; margin-top:14px; margin-right:8px;
   }
-  .deck{touch-action:pan-y; will-change:transform;}
+  /* The deck is a strip of cards that moves under your thumb, not one card
+     that is swapped for another when you let go. Every look is laid out
+     side by side and the strip is what travels, so the next one is already
+     coming in while you are still dragging. */
+  .deck-viewport{overflow:hidden;}
+  .deck{
+    display:flex; align-items:flex-start; gap:14px;
+    touch-action:pan-y; will-change:transform;
+    transition:transform var(--slide);
+  }
+  .deck.dragging{transition:none;}
+  .deck-cell{flex:0 0 100%; min-width:0;}
   .deck-dots{display:flex; justify-content:center; gap:7px; margin-top:12px;}
   .deck-dots span{
     width:7px;height:7px;border-radius:50%;background:rgba(239,232,216,0.22);
@@ -359,19 +370,6 @@
   }
   .deck-dots span.on{background:var(--bone); transform:scale(1.25);}
 
-  /* A card that is thrown off the screen should leave the way it was thrown,
-     and its replacement should come from the same side -- otherwise the deck
-     reads as a list that flickered rather than cards that moved. */
-  @keyframes deck-in-right{
-    from{opacity:0; transform:translate3d(38%,0,0) scale(0.97);}
-    to{opacity:1; transform:none;}
-  }
-  @keyframes deck-in-left{
-    from{opacity:0; transform:translate3d(-38%,0,0) scale(0.97);}
-    to{opacity:1; transform:none;}
-  }
-  .deck.enter-right{animation:deck-in-right var(--slide) both;}
-  .deck.enter-left{animation:deck-in-left var(--slide) both;}
   .deck-hint{text-align:center; font-size:11px; color:rgba(239,232,216,0.35); margin-top:7px; letter-spacing:0.5px;}
 
   /* ---- lookbook ---- */
@@ -3057,7 +3055,6 @@ function loggingStreak(){
 
 const TAB_ORDER = ['today','wardrobe','plan','stats','saved'];
 let lastRenderedTab = null;
-let pendingDeckEnter = null;   // which way the next outfit card should arrive from
 
 function reducedMotion(){
   return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -3414,7 +3411,7 @@ function renderOutfitResult(outfit, saved){
         ? '<div class="saved-flag">✓ Saved to your looks</div>'
           + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>'
-        : '<button class="save-outfit-btn" id="saveOutfitBtn">Save this look</button>'
+        : '<button class="save-outfit-btn">Save this look</button>'
           + '<button class="wore-btn" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>')
     + '</div>';
@@ -3431,10 +3428,20 @@ function renderStylistResults(){
     ? '<div class="deck-dots">'+res.outfits.map(function(_,i){ return '<span class="'+(i===idx?'on':'')+'"></span>'; }).join('')+'</div>'
     : '';
   const hint = many && !state.swipeHintSeen
-    ? '<div class="deck-hint">‹ swipe for the other looks ›</div>'
+    ? '<div class="deck-hint" id="deckHint">‹ swipe for the other looks ›</div>'
     : '';
 
-  return '<div class="deck" id="outfitDeck">'+renderOutfitResult(res.outfits[idx], false)+'</div>'+dots+hint;
+  /* Every look is built, not just the visible one. Swiping then costs a
+     translate rather than a rebuild of the whole view -- which is what made
+     the old deck lurch: it snapped back to centre, re-rendered, and only
+     then slid the replacement in. */
+  const cells = res.outfits.map(function(o){
+    return '<div class="deck-cell">'+renderOutfitResult(o, false)+'</div>';
+  }).join('');
+
+  return '<div class="deck-viewport" id="deckViewport">'
+    + '<div class="deck" id="outfitDeck">'+cells+'</div>'
+    + '</div>' + dots + hint;
 }
 
 function renderSaved(){
@@ -4610,9 +4617,73 @@ const DEMO_SHAPES = {
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = demoShade(hex,-28);
     ctx.beginPath(); ctx.ellipse(cx, top+H*0.012, W*0.105, H*0.032, 0,0,7); ctx.fill();
+
+    /* Cuffs. A sleeve that just stops is a sleeve on a diagram. Built from
+       the sleeve's own end edge, stepped back along its length -- guessing
+       an angle instead left them floating off the ends. */
+    if(!short){
+      [-1,1].forEach(function(s){
+        const shoulder = [cx+s*sh,             top+H*0.02];
+        const tipOuter = [cx+s*(sh+W*0.14),    top+H*0.30];
+        const tipInner = [cx+s*(sh+W*0.05),    top+H*0.34];
+        const armpit   = [cx+s*(sh-W*0.02),    top+H*0.10];
+        const back = 0.20;   // how far up the sleeve the cuff reaches
+        const up = function(p, q){
+          return [p[0] + (q[0]-p[0])*back, p[1] + (q[1]-p[1])*back];
+        };
+        const o2 = up(tipOuter, shoulder), i2 = up(tipInner, armpit);
+        ctx.beginPath();
+        ctx.moveTo(tipOuter[0], tipOuter[1]);
+        ctx.lineTo(tipInner[0], tipInner[1]);
+        ctx.lineTo(i2[0], i2[1]);
+        ctx.lineTo(o2[0], o2[1]);
+        ctx.closePath();
+        ctx.fillStyle = demoShade(hex, s < 0 ? -8 : -22);
+        ctx.fill();
+        ctx.strokeStyle = demoShade(hex,-46);
+        ctx.lineWidth = Math.max(1, W*0.0035);
+        ctx.stroke();
+      });
+    }
+
     if(o && o.placket){
-      ctx.strokeStyle = demoShade(hex,-42); ctx.lineWidth = Math.max(1,W*0.006);
-      ctx.beginPath(); ctx.moveTo(cx, top+H*0.06); ctx.lineTo(cx, bot); ctx.stroke();
+      /* A button-up needs the things that make it one: a collar standing
+         away from the neck, a placket band rather than a drawn line, and
+         buttons down it. Without them the oxford was a blank tee that the
+         caption insisted was formal. */
+      const band = W*0.030;
+      ctx.fillStyle = demoShade(hex, 12);
+      ctx.fillRect(cx - band/2, top+H*0.045, band, bot-(top+H*0.045));
+      ctx.strokeStyle = demoShade(hex,-40); ctx.lineWidth = Math.max(1,W*0.004);
+      ctx.beginPath();
+      ctx.moveTo(cx - band/2, top+H*0.045); ctx.lineTo(cx - band/2, bot);
+      ctx.moveTo(cx + band/2, top+H*0.045); ctx.lineTo(cx + band/2, bot);
+      ctx.stroke();
+
+      /* Two points with daylight between them, each folded back over the
+         neckline. Drawn as one mass they came out as a bib. */
+      [-1,1].forEach(function(s){
+        ctx.beginPath();
+        ctx.moveTo(cx + s*W*0.016, top+H*0.030);            // inner top, at the gap
+        ctx.lineTo(cx + s*W*0.105, top+H*0.004);            // shoulder end of the collar
+        ctx.quadraticCurveTo(
+          cx + s*W*0.098, top+H*0.070,
+          cx + s*W*0.050, top+H*0.104);                     // the point, hanging
+        ctx.lineTo(cx + s*W*0.020, top+H*0.062);
+        ctx.closePath();
+        ctx.fillStyle = demoShade(hex, s < 0 ? -12 : -30);  // one side catches the light
+        ctx.fill();
+        ctx.strokeStyle = demoShade(hex,-48);
+        ctx.lineWidth = Math.max(1, W*0.0035);
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = demoShade(hex,-52);
+      for(let b=0; b<4; b++){
+        ctx.beginPath();
+        ctx.arc(cx, top+H*(0.17+b*0.135), W*0.0105, 0, 7);
+        ctx.fill();
+      }
     }
   },
   knit: function(ctx,hex,W,H){
@@ -4694,18 +4765,44 @@ const DEMO_SHAPES = {
   skirt: function(ctx,hex,W,H){
     const cx=W/2, top=H*0.22, bot=H*0.74;
     ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.30,top,W*0.60,bot-top);
+    /* Pleats hang; they do not end on a ruled line. The hem now scallops
+       gently between the folds, which is most of what separates a skirt
+       from a trapezium. */
     ctx.beginPath();
-    ctx.moveTo(cx-W*0.19, top); ctx.lineTo(cx+W*0.19, top);
-    ctx.lineTo(cx+W*0.31, bot); ctx.lineTo(cx-W*0.31, bot);
+    ctx.moveTo(cx-W*0.19, top);
+    ctx.lineTo(cx+W*0.19, top);
+    ctx.lineTo(cx+W*0.31, bot);
+    for(let i=3; i>=-3; i--){
+      const x1 = cx + i*W*0.082, x0 = cx + (i-1)*W*0.082;
+      ctx.quadraticCurveTo((x1+x0)/2, bot + H*0.022, x0, bot);
+    }
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = demoShade(hex,-26);
-    ctx.fillRect(cx-W*0.19, top, W*0.38, H*0.035);
-    ctx.save(); ctx.globalAlpha=0.16; ctx.strokeStyle=demoShade(hex,-60);
-    ctx.lineWidth=Math.max(1,W*0.007);
+
+    /* Waistband, with its own edge so it sits on top of the pleats. */
+    ctx.fillStyle = demoShade(hex,-22);
+    ctx.fillRect(cx-W*0.195, top, W*0.39, H*0.042);
+    ctx.strokeStyle = demoShade(hex,-48); ctx.lineWidth = Math.max(1,W*0.004);
+    ctx.strokeRect(cx-W*0.195, top, W*0.39, H*0.042);
+    ctx.fillStyle = demoShade(hex,-52);
+    ctx.beginPath(); ctx.arc(cx+W*0.15, top+H*0.021, W*0.011, 0, 7); ctx.fill();
+
+    /* Each pleat catches light on one side of its fold and loses it on the
+       other; a single dark line per pleat reads as pinstripe. */
+    ctx.save();
+    ctx.lineWidth = Math.max(1, W*0.010);
     for(let i=-3;i<=3;i++){
+      ctx.globalAlpha = 0.20;
+      ctx.strokeStyle = demoShade(hex,-60);
       ctx.beginPath();
-      ctx.moveTo(cx+i*W*0.05, top+H*0.04);
-      ctx.lineTo(cx+i*W*0.082, bot); ctx.stroke();
+      ctx.moveTo(cx+i*W*0.05, top+H*0.046);
+      ctx.lineTo(cx+i*W*0.082, bot);
+      ctx.stroke();
+      ctx.globalAlpha = 0.10;
+      ctx.strokeStyle = demoShade(hex, 46);
+      ctx.beginPath();
+      ctx.moveTo(cx+i*W*0.05 + W*0.011, top+H*0.046);
+      ctx.lineTo(cx+i*W*0.082 + W*0.016, bot);
+      ctx.stroke();
     }
     ctx.restore();
   },
@@ -4771,6 +4868,81 @@ const DEMO_SHAPES = {
   }
 };
 
+/* Cloth grain. Built once and reused: every demo piece asks for it, and
+   filling 440x440 with random pixels twenty times over is not free. */
+let demoGrainPattern = null;
+function demoGrain(ctx){
+  if(!demoGrainPattern){
+    const n = document.createElement('canvas');
+    n.width = n.height = 96;
+    const nctx = n.getContext('2d');
+    const img = nctx.createImageData(96,96);
+    for(let i=0;i<img.data.length;i+=4){
+      const v = 118 + Math.random()*68;
+      img.data[i] = img.data[i+1] = img.data[i+2] = v;
+      img.data[i+3] = 255;
+    }
+    nctx.putImageData(img,0,0);
+    demoGrainPattern = n;
+  }
+  return ctx.createPattern(demoGrainPattern, 'repeat');
+}
+
+/* Everything the flat shapes have in common: a light, some creases, a
+   little dirt in the hem, and a weave. Applied over whatever was drawn
+   rather than written into each garment, so a shape only has to describe
+   its silhouette. source-atop keeps all of it inside the cloth. */
+function demoFinish(lctx, S){
+  lctx.save();
+  lctx.globalCompositeOperation = 'source-atop';
+
+  /* Creases. Cloth falls, so they run with the drop -- barely bowed, never
+     symmetrical. An arc across a garment is a smudge, not a fold. */
+  lctx.save();
+  lctx.filter = 'blur(' + (S*0.026) + 'px)';
+  lctx.lineCap = 'round';
+  const creases = [
+    /* x at top, x at bottom, top y, bottom y, bow */
+    [0.40, 0.38, 0.26, 0.76,  0.012],
+    [0.53, 0.555, 0.23, 0.79, -0.010],
+    [0.645, 0.665, 0.31, 0.72, 0.010],
+    [0.475, 0.46, 0.40, 0.80, -0.008]
+  ];
+  creases.forEach(function(f, i){
+    const dark = i % 2 === 0;
+    lctx.strokeStyle = dark ? 'rgba(0,0,0,0.11)' : 'rgba(255,255,255,0.10)';
+    lctx.lineWidth = S * (dark ? 0.019 : 0.014);
+    lctx.beginPath();
+    lctx.moveTo(S*f[0], S*f[2]);
+    lctx.quadraticCurveTo(
+      S*((f[0]+f[1])/2 + f[4]), S*((f[2]+f[3])/2), S*f[1], S*f[3]);
+    lctx.stroke();
+  });
+  lctx.restore();
+
+  /* One light, from the top left, across the whole piece. */
+  const key = lctx.createLinearGradient(0, 0, S*0.85, S);
+  key.addColorStop(0,   'rgba(255,255,255,0.17)');
+  key.addColorStop(0.42,'rgba(255,255,255,0.02)');
+  key.addColorStop(1,   'rgba(0,0,0,0.17)');
+  lctx.fillStyle = key; lctx.fillRect(0,0,S,S);
+
+  /* Cloth gathers and darkens toward the hem; without this the bottom edge
+     looks cut rather than hanging. */
+  const hem = lctx.createLinearGradient(0, S*0.52, 0, S);
+  hem.addColorStop(0, 'rgba(0,0,0,0)');
+  hem.addColorStop(1, 'rgba(0,0,0,0.20)');
+  lctx.fillStyle = hem; lctx.fillRect(0, S*0.52, S, S*0.48);
+
+  /* The weave. Barely there on purpose -- it is the difference between a
+     shape filled with a colour and something woven. */
+  lctx.globalAlpha = 0.055;
+  lctx.fillStyle = demoGrain(lctx);
+  lctx.fillRect(0,0,S,S);
+
+  lctx.restore();
+}
+
 function drawDemoGarment(shape, hex, opt){
   const S = 440;
   const c = document.createElement('canvas');
@@ -4783,12 +4955,40 @@ function drawDemoGarment(shape, hex, opt){
   ctx.globalAlpha=0.22; ctx.filter='blur(9px)'; ctx.fillStyle='#000';
   ctx.beginPath(); ctx.ellipse(S/2+S*0.03, S*0.86, S*0.29, S*0.042, 0,0,7); ctx.fill();
   ctx.restore();
+
+  /* The garment is drawn on its own layer rather than straight onto the
+     paper. That buys two things: the finishing pass can be clipped to the
+     cloth, and the drop shadow falls from one silhouette instead of from
+     every polygon -- sleeves used to cast shadows onto the body they are
+     part of. */
+  const layer = document.createElement('canvas');
+  layer.width = layer.height = S;
+  const lctx = layer.getContext('2d');
+  (DEMO_SHAPES[shape]||DEMO_SHAPES.top)(lctx, hex, S, S, opt||{});
+  demoFinish(lctx, S);
+
+  /* A white shirt on white paper had no edge at all -- it read as a hole in
+     the card. A tight dark halo behind the cloth gives it one, whatever
+     colour it is. */
+  const rim = document.createElement('canvas');
+  rim.width = rim.height = S;
+  const rctx = rim.getContext('2d');
+  rctx.drawImage(layer, 0, 0);
+  rctx.globalCompositeOperation = 'source-in';
+  rctx.fillStyle = 'rgba(48,44,38,0.75)';
+  rctx.fillRect(0,0,S,S);
+  ctx.save();
+  ctx.filter = 'blur(' + (S*0.006) + 'px)';
+  ctx.globalAlpha = 0.55;
+  ctx.drawImage(rim, 0, 0);
+  ctx.restore();
+
   ctx.save();
   ctx.shadowColor='rgba(0,0,0,0.30)'; ctx.shadowBlur=S*0.035;
   ctx.shadowOffsetX=S*0.012; ctx.shadowOffsetY=S*0.016;
-  (DEMO_SHAPES[shape]||DEMO_SHAPES.top)(ctx, hex, S, S, opt||{});
+  ctx.drawImage(layer, 0, 0);
   ctx.restore();
-  return c.toDataURL('image/jpeg', 0.82);
+  return c.toDataURL('image/jpeg', 0.86);
 }
 
 /* name, category, shape, hex, colour, price, drawing options */
@@ -5147,7 +5347,12 @@ function attachDynamicHandlers(){
     render();
   });
 
-  on('saveOutfitBtn', async function(){
+  /* Every look in the deck carries its own save button now, so this is
+     wired by class -- an id would only ever reach the first card. */
+  document.querySelectorAll('.save-outfit-btn').forEach(function(btn){
+    btn.onclick = saveVisibleLook;
+  });
+  async function saveVisibleLook(){
     const res = normalizeResult(state.lastResult);
     const idx = Math.min(state.activeOption||0, res.outfits.length-1);
     const chosen = res.outfits[idx];
@@ -5156,7 +5361,7 @@ function attachDynamicHandlers(){
     chosen.__saved = true;    /* keep it on screen — you still need to log wearing it */
     render();
     toast('Look saved');
-  });
+  }
 
   /* --- calendar --- */
   on('calPrev', function(){ shiftMonth(-1); });
@@ -5191,83 +5396,101 @@ function attachDynamicHandlers(){
     toast('Building around '+dusty.item.name);
   });
 
-  /* --- swipe between generated looks --- */
+  /* --- the deck of generated looks travels under your thumb --- */
   const deck = document.getElementById('outfitDeck');
-  if(deck){
-    /* The card the last swipe brought in enters from the side it was thrown
-       from, so the deck reads as one strip of cards being moved along. */
-    if(pendingDeckEnter && !reducedMotion()){
-      deck.classList.add(pendingDeckEnter === 'next' ? 'enter-right' : 'enter-left');
-    }
-    pendingDeckEnter = null;
+  const deckPort = document.getElementById('deckViewport');
+  if(deck && deckPort){
+    const GAP = 14;                       // matches the gap in .deck
+    const cells = deck.children.length;
+    let idx = Math.min(state.activeOption||0, cells-1);
 
-    let x0=null, y0=null, t0=0, dragging=false, axis=null, lastDx=0;
+    /* Lazy images never load while they are parked off to the side, so the
+       card you swipe to would arrive empty and fill in afterwards. */
+    deck.querySelectorAll('img[loading="lazy"]').forEach(function(img){ img.loading = 'eager'; });
 
-    function deckBounds(){
-      const res = normalizeResult(state.lastResult);
-      const n = res.outfits.length;
-      const cur = Math.min(state.activeOption||0, n-1);
-      return {n:n, cur:cur};
+    function step(){ return deckPort.clientWidth + GAP; }
+
+    function place(i, animate){
+      deck.classList.toggle('dragging', !animate);
+      deck.style.transform = 'translate3d(' + (-i * step()) + 'px,0,0)';
+      if(!animate) void deck.offsetWidth;   // commit before easing returns
     }
+
+    function land(i){
+      idx = i;
+      state.activeOption = i;
+      place(i, true);
+      const dots = document.querySelectorAll('.deck-dots span');
+      dots.forEach(function(d, n){ d.classList.toggle('on', n === i); });
+    }
+
+    place(idx, false);
+    deck.classList.remove('dragging');
+    window.addEventListener('resize', function(){ place(idx, false); deck.classList.remove('dragging'); });
+
+    let x0=null, y0=null, t0=0, dragging=false, axis=null, dx=0;
 
     deck.addEventListener('touchstart', function(e){
       x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-      t0 = e.timeStamp; dragging = true; axis = null; lastDx = 0;
-      deck.style.transition = 'none';
+      t0 = e.timeStamp; dragging = true; axis = null; dx = 0;
     }, {passive:true});
 
     deck.addEventListener('touchmove', function(e){
       if(!dragging || x0===null) return;
-      const dx = e.touches[0].clientX - x0;
-      const dy = e.touches[0].clientY - y0;
+      const mx = e.touches[0].clientX - x0;
+      const my = e.touches[0].clientY - y0;
 
       /* Decide once whether this is a swipe or a scroll. Re-deciding every
          frame is what makes a card twitch sideways while you scroll past it. */
       if(axis === null){
-        if(Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-        axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        if(Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+        axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        if(axis === 'x') deck.classList.add('dragging');
       }
       if(axis !== 'x') return;
 
-      /* One to one with the finger, except past the ends of the deck, where
-         it pulls back like something on a rail with nowhere left to go. */
-      const b = deckBounds();
-      const atEnd = (dx < 0 && b.cur >= b.n-1) || (dx > 0 && b.cur <= 0);
-      const travel = atEnd ? dx * 0.22 : dx;
-      lastDx = dx;
-
-      deck.style.transform = 'translate3d(' + travel + 'px,0,0) rotate(' + (travel * 0.014) + 'deg)';
-      deck.style.opacity = String(Math.max(0.55, 1 - Math.abs(travel) / 620));
+      /* One to one with the finger, except past either end of the strip,
+         where it pulls back against nothing. */
+      const atEnd = (mx < 0 && idx >= cells-1) || (mx > 0 && idx <= 0);
+      dx = atEnd ? mx * 0.28 : mx;
+      deck.style.transform = 'translate3d(' + (-idx * step() + dx) + 'px,0,0)';
     }, {passive:true});
 
     deck.addEventListener('touchend', function(e){
       if(!dragging || x0===null) return;
       dragging = false;
-      const dx = e.changedTouches[0].clientX - x0;
+      if(axis !== 'x'){ x0=null; y0=null; axis=null; return; }
+
       const dt = Math.max(1, e.timeStamp - t0);
-      const speed = Math.abs(dx) / dt;          // px per ms
+      const speed = Math.abs(dx) / dt;      // px per ms
 
-      deck.style.transition = '';
-      deck.style.transform = '';
-      deck.style.opacity = '';
+      /* A short flick counts. Distance alone means a fast, confident swipe
+         is ignored while a slow drag succeeds, which is backwards from how
+         it feels in the hand. */
+      const committed = Math.abs(dx) > step() * 0.28 || (speed > 0.45 && Math.abs(dx) > 18);
+      let target = idx;
+      if(committed) target = dx < 0 ? Math.min(idx+1, cells-1) : Math.max(idx-1, 0);
 
-      /* A short flick counts. Requiring distance alone means a fast,
-         confident swipe gets ignored while a slow drag succeeds, which is
-         backwards from how it feels in the hand. */
-      const committed = axis === 'x' && (Math.abs(dx) > 55 || (speed > 0.45 && Math.abs(dx) > 18));
-      if(committed){
-        const b = deckBounds();
-        const next = dx < 0 ? Math.min(b.cur+1, b.n-1) : Math.max(b.cur-1, 0);
-        if(next !== b.cur){
-          pendingDeckEnter = dx < 0 ? 'next' : 'prev';
-          state.activeOption = next;
-          state.swipeHintSeen = true;
-          tick(8);
-          render();
-        }
+      if(target !== idx){
+        state.swipeHintSeen = true;
+        const hint = document.getElementById('deckHint');
+        if(hint) hint.remove();
+        tick(8);
       }
-      x0=null; y0=null; axis=null; lastDx=0;
+      land(target);
+      x0=null; y0=null; axis=null; dx=0;
     }, {passive:true});
+
+    deck.addEventListener('touchcancel', function(){
+      if(!dragging) return;
+      dragging = false; axis = null; dx = 0; x0 = null; y0 = null;
+      place(idx, true);
+    }, {passive:true});
+
+    /* The dots are a control, not just a readout. */
+    document.querySelectorAll('.deck-dots span').forEach(function(d, n){
+      d.onclick = function(){ if(n !== idx){ tick(6); land(n); } };
+    });
   }
 }
 
