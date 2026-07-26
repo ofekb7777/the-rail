@@ -36,6 +36,17 @@ python -m http.server 8000
 npx serve
 ```
 
+## Trying it without photographing anything
+
+Settings → **Demo wardrobe** → *Add demo pieces* fills the rail with twenty
+garments and a month of wear history, so suggestions, planning, gap analysis
+and cost per wear all have something to work with immediately.
+
+The pieces are drawn on a canvas when you ask for them rather than shipped as
+image files, so they cost nothing until used. They sit alongside anything of
+your own and **Remove demo pieces** takes out exactly those, along with the
+wear history that came with them, leaving your own things untouched.
+
 ## On your phone
 
 The layout is built for a phone first; the desktop view is the afterthought.
