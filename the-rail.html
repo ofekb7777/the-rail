@@ -1440,6 +1440,96 @@ function cutOutBackground(canvas){
   return {applied:true, mask:seen, coverage:1-frac};
 }
 
+/* ---------- white balance ----------
+   Every colour judgement below assumes the photo was lit by something close to
+   daylight. Indoors it never is: a warm bulb multiplies the whole frame toward
+   orange, and the palette match follows it -- a white shirt reads beige, navy
+   reads charcoal, a grey tee reads tan. Nothing else in the pipeline can undo
+   that, because the pixels really are those colours.
+
+   So estimate the light from the backdrop and divide it out, the way a camera's
+   auto white balance does. The backdrop is the best reference available: it is
+   the largest surface in frame and usually a wall, sheet or floor.
+
+   The catch is that a neutral wall under warm light and a genuinely tan wall
+   under neutral light are the same pixels -- the ambiguity is unsolvable in
+   general. What makes it safe is refusing to correct anything that could not be
+   a room light: a real illuminant shifts red against blue while leaving green
+   nearly alone, so a green or magenta backdrop is taken at face value rather
+   than "corrected" into one. The remaining shift is clamped and applied at
+   nine-tenths strength, so a strongly coloured backdrop nudges the reading
+   instead of rewriting it. */
+function estimateIlluminant(canvas){
+  const w = canvas.width, h = canvas.height;
+  const d = canvas.getContext('2d', {willReadFrequently:true}).getImageData(0,0,w,h).data;
+  const band = Math.max(2, Math.round(Math.min(w,h) * 0.06));
+  const step = Math.max(1, Math.round(Math.min(w,h) / 70));
+  let sr=0, sg=0, sb=0, n=0;
+  const eat = function(x,y){
+    const p = (y*w + x) * 4;
+    /* blown-out and crushed pixels carry no hue worth trusting */
+    const mx = Math.max(d[p],d[p+1],d[p+2]);
+    if(mx > 250 || mx < 26) return;
+    sr+=d[p]; sg+=d[p+1]; sb+=d[p+2]; n++;
+  };
+  for(let x=0; x<w; x+=step){
+    for(let y=0; y<band; y+=step) eat(x,y);
+    for(let y=Math.max(band,h-band); y<h; y+=step) eat(x,y);
+  }
+  for(let y=band; y<h-band; y+=step){
+    for(let x=0; x<band; x+=step) eat(x,y);
+    for(let x=Math.max(band,w-band); x<w; x+=step) eat(x,y);
+  }
+  if(n < 40) return null;
+
+  const r = sr/n, g = sg/n, b = sb/n;
+  const grey = (r+g+b)/3;
+  /* too dark to read a hue off reliably -- noise would dominate */
+  if(grey < 46) return null;
+
+  let gr = grey/Math.max(1,r), gg = grey/Math.max(1,g), gb = grey/Math.max(1,b);
+
+  /* Not a light source: room lighting runs warm-to-cool, trading red against
+     blue with green riding in the middle. Anything else is a coloured surface. */
+  if(Math.abs(gg - 1) > 0.12) return null;
+  const warm = gr <= gg && gg <= gb;      /* orange light -> lift blue */
+  const cool = gr >= gg && gg >= gb;      /* blue light   -> lift red  */
+  if(!warm && !cool) return null;
+
+  /* Refuse a large correction rather than scaling it down. The size of the
+     implied shift is itself the evidence: a room light bends a neutral surface
+     only so far, so anything past that is not a lit wall but a coloured one --
+     wood, paint, carpet -- whose colour belongs in the photo. Clamping such a
+     case still applied most of the shift and dragged the garment with it, which
+     is how a brown boot on a pale wood floor came back charcoal, and a red top
+     against a blue wall came back orange.
+
+     The cost is that a very warm lamp is now left alone instead of half-fixed.
+     That is the right trade: a slightly warm reading beats a confidently wrong
+     one, and the piece can still be corrected by hand. */
+  const inBand = function(v){ return v >= 0.86 && v <= 1.24; };
+  if(!inBand(gr) || !inBand(gg) || !inBand(gb)) return null;
+  const soften = function(v){ return 1 + (v - 1) * 0.9; };
+  gr = soften(gr); gg = soften(gg); gb = soften(gb);
+
+  /* already neutral -- leave the pixels alone */
+  if(Math.abs(gr-1) < 0.025 && Math.abs(gb-1) < 0.025) return null;
+  return [gr, gg, gb];
+}
+
+function applyGains(canvas, gains){
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    d[i]   = d[i]   * gains[0];
+    d[i+1] = d[i+1] * gains[1];
+    d[i+2] = d[i+2] * gains[2];
+  }
+  ctx.putImageData(img,0,0);
+}
+
 /* ---------- dominant colour ----------
    Samples the subject, ignoring anything the cut-out marked as background
    and anything near the frame edge, weights toward the centre, then maps
@@ -1641,12 +1731,28 @@ async function processPhoto(file, doCutout){
 
   /* analyse at a decent size — fine detail matters for colour clustering */
   const work = drawToCanvas(img, 420);
+
+  /* Read the light before anything touches the pixels: the cut-out paints the
+     backdrop white, and the backdrop is exactly the evidence we need. */
+  let gains = null;
+  try{ gains = estimateIlluminant(work); }
+  catch(e){ console.warn('white balance failed', e); }
+
   let cut = {applied:false};
   if(doCutout){
     try{ cut = cutOutBackground(work); }
     catch(e){ console.warn('cutout failed', e); cut = {applied:false, reason:'error'}; }
   }
-  const colors = detectColors(work, cut.applied ? cut.mask : null);
+
+  /* Colour is judged on a white-balanced copy, never on the stored photo --
+     the picture should still look like the room it was taken in. The mask lines
+     up because both canvases come from the same image at the same size. */
+  let measure = work;
+  if(gains){
+    measure = drawToCanvas(img, 420);
+    applyGains(measure, gains);
+  }
+  const colors = detectColors(measure, cut.applied ? cut.mask : null);
 
   /* store at 520px — plenty for a phone screen, kind to the storage quota */
   const store = drawToCanvas(img, 520);
