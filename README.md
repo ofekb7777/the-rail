@@ -1,5 +1,8 @@
 # THE RAIL
 
+**Live: <https://ofekb7777.github.io/the-rail/>** — open it on a phone and
+choose *Add to Home Screen* for a fullscreen app that works offline.
+
 A wardrobe app that photographs your clothes, learns what goes together, and
 tells you what to wear. One HTML file. No accounts, no server, no API keys.
 
