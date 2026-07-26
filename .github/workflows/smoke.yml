@@ -1,0 +1,30 @@
+# main is what GitHub Pages serves, so a broken commit on main is a broken app
+# for anyone who has it on their home screen. This runs on every pull request
+# and on every push to main: the app has to boot and render each tab before it
+# gets anywhere near the live site.
+name: Smoke test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Installed here rather than committed as a dependency: the app itself
+      # has none, and keeping it that way is half the point of the project.
+      - name: Install Playwright
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+
+      - name: Boot the app and visit every tab
+        run: node .github/smoke.mjs
