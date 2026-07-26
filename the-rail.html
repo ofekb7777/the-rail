@@ -5054,7 +5054,78 @@ document.querySelectorAll('nav.tabs button').forEach(function(b){
   b.onclick = function(){ state.tab = b.dataset.tab; render(); };
 });
 
+/* ============================================================
+   HOME SCREEN — an installed app needs an icon and a manifest.
+   Both are generated here rather than shipped: drawing the icon
+   costs a dozen lines, where embedding it as base64 would add
+   about 25KB to a file whose whole appeal is that it is one
+   modest file you can email to someone.
+   ============================================================ */
+function railIcon(S){
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const x = c.getContext('2d');
+  /* Flat ground on purpose: a gradient here quintuples the PNG for a
+     detail nobody sees at 60 pixels. */
+  x.fillStyle = '#1b2130';
+  x.fillRect(0,0,S,S);
+  const u = S/512, cx = S/2;
+  x.strokeStyle = '#efe8d8';
+  x.lineCap = 'round'; x.lineJoin = 'round'; x.lineWidth = 26*u;
+  x.beginPath(); x.arc(cx, 150*u, 34*u, Math.PI*0.85, Math.PI*2.35, false); x.stroke();
+  x.beginPath();
+  x.moveTo(cx, 186*u); x.lineTo(108*u, 322*u); x.lineTo(404*u, 322*u);
+  x.closePath(); x.stroke();
+  x.fillStyle = '#b23a48';
+  x.beginPath(); x.arc(cx, 398*u, 26*u, 0, 7); x.fill();
+  return c.toDataURL('image/png');
+}
+
+function installHomeScreen(){
+  try{
+    const link = function(rel, href, extra){
+      const el = document.createElement('link');
+      el.rel = rel; el.href = href;
+      if(extra) Object.keys(extra).forEach(function(k){ el.setAttribute(k, extra[k]); });
+      document.head.appendChild(el);
+      return el;
+    };
+    const i180 = railIcon(180), i512 = railIcon(512);
+
+    /* iOS reads this when you tap Add to Home Screen; with the apple-* meta
+       tags already in the head it is all Safari needs for a full-screen app. */
+    link('apple-touch-icon', i180, {sizes:'180x180'});
+    link('icon', i512, {sizes:'512x512', type:'image/png'});
+
+    /* Chrome additionally wants a manifest before it will treat this as an
+       installable app rather than a bookmark. start_url is absolute because a
+       data: manifest has no useful base to resolve a relative one against. */
+    const manifest = {
+      name: 'THE RAIL',
+      short_name: 'THE RAIL',
+      description: 'Your wardrobe, and what to wear from it.',
+      start_url: location.href.split('#')[0],
+      scope: location.href.replace(/[^/]*$/, ''),
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: '#1b2130',
+      theme_color: '#1b2130',
+      icons: [
+        {src:i512, sizes:'512x512', type:'image/png', purpose:'any'},
+        {src:i512, sizes:'512x512', type:'image/png', purpose:'maskable'},
+        {src:i180, sizes:'180x180', type:'image/png'}
+      ]
+    };
+    link('manifest', 'data:application/manifest+json;charset=utf-8,'
+      + encodeURIComponent(JSON.stringify(manifest)));
+  }catch(e){
+    /* Cosmetic. A missing icon must never stop the wardrobe loading. */
+    console.warn('home screen setup skipped', e);
+  }
+}
+
 /* ---------- init ---------- */
+installHomeScreen();
 loadAll();
 
 </script>
