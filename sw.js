@@ -38,7 +38,7 @@ self.addEventListener('fetch', function(e){
   if(req.method !== 'GET') return;
 
   const url = new URL(req.url);
-  if(url.origin !== self.location.origin) return;   /* weather, fonts: leave alone */
+  if(url.origin !== self.location.origin) return;   /* fonts and outbound links: leave alone */
 
   e.respondWith(
     fetch(req)
