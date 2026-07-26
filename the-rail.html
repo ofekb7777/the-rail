@@ -586,7 +586,7 @@
   .rank-val.good{color:var(--sage);}
   .rank-val.bad{color:var(--thread);}
 
-  .cpw-note{
+  .stat-note{
     font-size:11.5px; line-height:1.55; color:rgba(239,232,216,0.4);
     border-top:1px solid var(--line); padding-top:12px; margin-top:14px;
   }
@@ -1086,8 +1086,7 @@ let state = {
   calSelected: null,
   builder: null,    /* {slots:{cat:itemId}, targetDate:null}  */
   lastBackupAt: null,
-  weather: null,
-  currency: '£'
+  weather: null
 };
 
 /* ============================================================
@@ -1177,7 +1176,6 @@ async function loadAll(){
   state.wearLog = await readJson('wardrobe:wearlog', []);
   state.plans   = await readJson('wardrobe:plans', {});
   const prefs   = await readJson('wardrobe:prefs', {});
-  if(prefs.currency) state.currency = prefs.currency;
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
@@ -1209,7 +1207,7 @@ function saveItems(){   return saveKey('wardrobe:items',   state.items); }
 function saveOutfits(){ return saveKey('wardrobe:outfits', state.outfits); }
 function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
-function savePrefs(){   return saveKey('wardrobe:prefs',   {currency: state.currency, cutout: state.cutout}); }
+function savePrefs(){   return saveKey('wardrobe:prefs',   {cutout: state.cutout}); }
 
 /* ============================================================
    BACKUP
@@ -1220,7 +1218,7 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     items: state.items, outfits: state.outfits,
     wearLog: state.wearLog, plans: state.plans,
-    prefs: {currency: state.currency}
+    prefs: {cutout: state.cutout}
   };
   try{
     const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
@@ -1263,7 +1261,7 @@ async function importBackup(file, mode){
       if(!state.plans[d]) state.plans[d] = data.plans[d];
     });
   }
-  if(data.prefs && data.prefs.currency) state.currency = data.prefs.currency;
+  if(data.prefs && typeof data.prefs.cutout === 'boolean') state.cutout = data.prefs.cutout;
   state.items.forEach(enrichItem);
   await saveItems(); await saveOutfits(); await saveWearLog(); await savePlans(); await savePrefs();
 }
@@ -2853,15 +2851,8 @@ function gapReason(x, f, base){
 /* ============================================================
    STATS
    ============================================================ */
-function money(n){
-  if(n === null || n === undefined || isNaN(n)) return '—';
-  return state.currency + (Math.round(n*100)/100).toFixed(2);
-}
-
 function wardrobeStats(){
   const items = state.items;
-  const priced = items.filter(function(i){ return typeof i.price === 'number' && i.price > 0; });
-  const totalValue = priced.reduce(function(s,i){ return s + i.price; }, 0);
 
   const rows = items.map(function(i){
     const n = wearCount(i.id);
@@ -2869,8 +2860,7 @@ function wardrobeStats(){
       item: i,
       wears: n,
       lastWorn: lastWorn(i.id),
-      days: daysSinceWorn(i.id),
-      cpw: (typeof i.price === 'number' && i.price > 0 && n > 0) ? i.price / n : null
+      days: daysSinceWorn(i.id)
     };
   });
 
@@ -2878,11 +2868,17 @@ function wardrobeStats(){
   const never = rows.filter(function(r){ return r.wears === 0; });
   const dormant = rows.filter(function(r){ return r.wears > 0 && r.days >= 90; });
 
-  /* wears in the trailing 30 days */
+  /* wears in the trailing 30 days, and how much of the wardrobe they drew on:
+     forty wears spread over six pieces is a very different month from forty
+     over thirty. */
   const cutoff = Date.now() - 30*86400000;
-  let wears30 = 0, days30 = {};
+  let wears30 = 0, days30 = {}, pieces30 = {};
   state.wearLog.forEach(function(w){
-    if(parseKey(w.date).getTime() >= cutoff){ wears30 += w.itemIds.length; days30[w.date] = true; }
+    if(parseKey(w.date).getTime() >= cutoff){
+      wears30 += w.itemIds.length;
+      days30[w.date] = true;
+      w.itemIds.forEach(function(id){ pieces30[id] = true; });
+    }
   });
 
   const byCat = {};
@@ -2893,14 +2889,9 @@ function wardrobeStats(){
   items.forEach(function(i){ byColor[i.color] = (byColor[i.color]||0)+1; });
 
   const totalWears = rows.reduce(function(s,r){ return s+r.wears; }, 0);
-  const activeValue = priced.filter(function(i){ return wearCount(i.id) > 0; })
-                            .reduce(function(s,i){ return s+i.price; }, 0);
 
   return {
     count: items.length,
-    priced: priced.length,
-    totalValue: totalValue,
-    idleValue: totalValue - activeValue,
     rows: rows,
     worn: worn,
     never: never,
@@ -2908,12 +2899,11 @@ function wardrobeStats(){
     totalWears: totalWears,
     wears30: wears30,
     daysLogged30: Object.keys(days30).length,
+    pieces30: Object.keys(pieces30).filter(function(id){
+      return items.some(function(i){ return i.id === id; });   /* ignore pieces since removed */
+    }).length,
     byCat: byCat,
     byColor: byColor,
-    avgCpw: (function(){
-      const c = rows.filter(function(r){ return r.cpw !== null; });
-      return c.length ? c.reduce(function(s,r){ return s+r.cpw; },0)/c.length : null;
-    })(),
     utilisation: items.length ? Math.round((worn.length/items.length)*100) : 0
   };
 }
@@ -2984,7 +2974,7 @@ function renderWardrobe(){
     return '<button class="chip '+(state.filter===c?'active':'')+'" data-filter="'+c+'">'+c+'</button>';
   }).join('')+'</div>';
 
-  const SORTS = [{v:'new',l:'Newest'},{v:'unworn',l:'Least worn'},{v:'name',l:'A–Z'},{v:'value',l:'Cost per wear'}];
+  const SORTS = [{v:'new',l:'Newest'},{v:'unworn',l:'Least worn'},{v:'name',l:'A–Z'}];
   const sortHtml = '<div class="sort-row">'+SORTS.map(function(x){
     return '<button class="sort-btn '+(state.sort===x.v?'active':'')+'" data-sort="'+x.v+'">'+x.l+'</button>';
   }).join('')+'</div>';
@@ -2999,14 +2989,6 @@ function renderWardrobe(){
     });
   }else if(state.sort==='name'){
     filtered = filtered.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
-  }else if(state.sort==='value'){
-    filtered = filtered.slice().sort(function(a,b){
-      const ac = costPerWear(a), bc = costPerWear(b);
-      if(ac===null && bc===null) return 0;
-      if(ac===null) return 1;
-      if(bc===null) return -1;
-      return bc-ac;                       /* worst value first — that's the useful end */
-    });
   }else{
     filtered = filtered.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
   }
@@ -3018,17 +3000,10 @@ function renderWardrobe(){
   return searchHtml + filtersHtml + sortHtml + gridHtml;
 }
 
-function costPerWear(item){
-  if(typeof item.price !== 'number' || item.price <= 0) return null;
-  const n = wearCount(item.id);
-  return n > 0 ? item.price/n : item.price;   /* never worn = you've paid full price */
-}
-
 function renderTagCard(item, idx){
   const c = colorByName(item.color);
   const lw = lastWorn(item.id);
   const fresh = !lw || daysSince(lw) > 21;
-  const cpw = state.sort==='value' ? costPerWear(item) : null;
   return '<div class="tag-card" data-id="'+item.id+'">'
     + '<div class="tag-hole"></div><div class="tag-string"></div>'
     + '<div class="tag-body">'
@@ -3037,9 +3012,7 @@ function renderTagCard(item, idx){
     +   '<div class="tag-img-wrap"><img src="'+imgSrc(item)+'" loading="lazy" alt=""></div>'
     +   '<div class="tag-label">'+escapeHtml(item.name)+'</div>'
     +   '<div class="tag-meta"><span class="swatch" style="background:'+c.hex+'"></span>'+item.category+'</div>'
-    +   '<div class="tag-worn '+(fresh?'fresh':'')+'">'
-    +     (cpw!==null ? money(cpw)+' per wear' : daysAgoLabel(lw))
-    +   '</div>'
+    +   '<div class="tag-worn '+(fresh?'fresh':'')+'">'+daysAgoLabel(lw)+'</div>'
     + '</div></div>';
 }
 
@@ -3467,38 +3440,23 @@ function renderStats(){
   }
   const s = wardrobeStats();
 
-  const valueCard = s.priced
-    ? '<div class="stat-card"><div class="stat-val">'+money(s.totalValue)+'</div>'
-      + '<div class="stat-lbl">wardrobe value</div>'
-      + '<div class="stat-sub">'+s.priced+' of '+s.count+' pieces priced</div></div>'
-    : '<div class="stat-card"><div class="stat-val">—</div><div class="stat-lbl">wardrobe value</div>'
-      + '<div class="stat-sub">Add prices when editing a piece to unlock cost per wear</div></div>';
+  /* What the month actually drew on. The count of wears alone cannot tell a
+     month of variety from a month of the same three things. */
+  const rotationCard = '<div class="stat-card"><div class="stat-val">'+s.pieces30+'</div>'
+    + '<div class="stat-lbl">pieces in rotation</div>'
+    + '<div class="stat-sub">'
+    +   (s.count ? 'of '+s.count+' you own, this month' : 'nothing logged yet')
+    + '</div></div>';
 
   const cards = '<div class="stat-cards">'
     + '<div class="stat-card"><div class="stat-val">'+s.count+'</div><div class="stat-lbl">pieces</div>'
     +   '<div class="stat-sub">'+s.totalWears+' wears logged</div></div>'
     + '<div class="stat-card"><div class="stat-val">'+s.utilisation+'<small>%</small></div><div class="stat-lbl">actually worn</div>'
     +   '<div class="stat-sub">'+s.never.length+' never worn</div></div>'
-    + valueCard
+    + rotationCard
     + '<div class="stat-card"><div class="stat-val">'+s.wears30+'</div><div class="stat-lbl">wears this month</div>'
     +   '<div class="stat-sub">across '+s.daysLogged30+' logged day'+(s.daysLogged30===1?'':'s')+'</div></div>'
     + '</div>';
-
-  /* --- cost per wear, best and worst --- */
-  let cpwBlock = '';
-  const withCpw = s.rows.filter(function(r){ return r.cpw !== null; });
-  if(withCpw.length){
-    const best = withCpw.slice().sort(function(a,b){ return a.cpw-b.cpw; }).slice(0,3);
-    const worst = withCpw.slice().sort(function(a,b){ return b.cpw-a.cpw; }).slice(0,3);
-    cpwBlock = '<div class="sec-head"><div class="sec-title">Best value</div></div>'
-      + best.map(function(r){ return rankRow(r, money(r.cpw), 'good', r.wears+' wears'); }).join('')
-      + '<div class="sec-head"><div class="sec-title">Costing you the most</div></div>'
-      + worst.map(function(r){
-          return rankRow(r, money(r.cpw), 'bad', r.wears===0 ? 'never worn' : r.wears+' wear'+(r.wears===1?'':'s'));
-        }).join('')
-      + '<div class="cpw-note">Cost per wear is the price divided by the number of times you have logged it. '
-      + 'A piece you have never worn shows its full price, because that is what it has cost you so far.</div>';
-  }
 
   /* --- most worn --- */
   const mostWorn = s.rows.slice().sort(function(a,b){ return b.wears-a.wears; })
@@ -3541,11 +3499,14 @@ function renderStats(){
           + '<div class="bar-num">'+s.byColor[c]+'</div></div>';
       }).join('')+'</div>';
 
-  const idleNote = (s.priced && s.idleValue > 0)
-    ? '<div class="cpw-note">'+money(s.idleValue)+' of what you own has never been worn.</div>'
+  /* The same fact the value note used to make, without pricing it: a piece
+     you have never worn is the one worth styling next. */
+  const idleNote = s.never.length
+    ? '<div class="stat-note">'+s.never.length+' piece'+(s.never.length===1?'':'s')
+      + ' you own '+(s.never.length===1?'has':'have')+' never been worn.</div>'
     : '';
 
-  return cards + mostWornBlock + deadBlock + cpwBlock + idleNote + catBlock + colBlock;
+  return cards + mostWornBlock + deadBlock + idleNote + catBlock + colBlock;
 }
 
 function rankRow(r, val, cls, sub){
@@ -3938,7 +3899,6 @@ function openDetail(id){
   const item = state.items.find(function(i){ return i.id===id; });
   if(!item) return;
   const c = colorByName(item.color);
-  const cpw = costPerWear(item);
   const n = wearCount(id);
 
   const combos = buildLocalOutfits(id, 3);
@@ -3960,8 +3920,7 @@ function openDetail(id){
 
   const metaLine = [
     daysAgoLabel(lastWorn(id)),
-    n ? 'worn '+n+'×' : null,
-    cpw!==null ? money(cpw)+' per wear' : null
+    n ? 'worn '+n+'×' : null
   ].filter(Boolean).join(' · ');
 
   document.getElementById('detailSheet').innerHTML =
@@ -3984,10 +3943,7 @@ function openDetail(id){
     + '<button class="btn-secondary" id="editItemBtn">Edit details</button>'
     + '<div id="editPanel" style="display:none; margin-top:12px;">'
     +   '<label class="field"><span>Name</span><input type="text" id="editName" value="'+escapeHtml(item.name)+'"></label>'
-    +   '<div class="field-row">'
-    +     '<label class="field"><span>Brand</span><input type="text" id="editBrand" value="'+escapeHtml(item.brand||'')+'"></label>'
-    +     '<label class="field"><span>Price ('+state.currency+')</span><input type="number" inputmode="decimal" step="0.01" id="editPrice" value="'+(item.price!=null?item.price:'')+'"></label>'
-    +   '</div>'
+    +   '<label class="field"><span>Brand</span><input type="text" id="editBrand" value="'+escapeHtml(item.brand||'')+'"></label>'
     +   '<label class="field"><span>Category</span><select id="editCategory">'+categoryOptions(item.category)+'</select></label>'
     +   '<label class="field"><span>Colour</span><div class="color-row" id="editColorRow">'
     +     COLORS.map(function(cc){
@@ -4066,8 +4022,6 @@ function openDetail(id){
     if(Math.round(target.formality) !== newForm) target.formalityAuto = false;
     target.name = document.getElementById('editName').value.trim() || target.name;
     target.brand = document.getElementById('editBrand').value.trim() || null;
-    const priceRaw = document.getElementById('editPrice').value.trim();
-    target.price = priceRaw === '' ? null : (isNaN(parseFloat(priceRaw)) ? null : parseFloat(priceRaw));
     target.category = document.getElementById('editCategory').value;
     target.color = editColor;
     target.warmth = newWarm;
@@ -4372,7 +4326,6 @@ document.getElementById('saveBatchBtn').onclick = async function(){
       formality: inf.formality,
       tags: inf.tags,
       brand: null,
-      price: null,
       favourite: false,
       createdAt: Date.now()
     });
@@ -4611,31 +4564,31 @@ function drawDemoGarment(shape, hex, opt){
   return c.toDataURL('image/jpeg', 0.82);
 }
 
-/* name, category, shape, hex, colour, price, drawing options */
+/* name, category, shape, hex, colour, drawing options */
 const DEMO_PIECES = [
-  ['White oxford shirt',      'top',      'top',       '#f5f5f0','white',   45, {placket:true}],
-  ['Grey wool jumper',        'top',      'knit',      '#8a8a86','grey',    68, null],
-  ['Navy merino knit',        'top',      'knit',      '#1f2b4d','navy',    72, null],
-  ['Black cotton t-shirt',    'top',      'top',       '#1a1a1a','black',   18, {short:true}],
-  ['Burgundy linen shirt',    'top',      'top',       '#5c1f2e','burgundy',52, {placket:true}],
-  ['Navy wool overcoat',      'outerwear','outerwear', '#1f2b4d','navy',   240, null],
-  ['Olive field jacket',      'outerwear','outerwear', '#6b7c3a','olive',  130, {short:true}],
-  ['Charcoal wool blazer',    'outerwear','outerwear', '#3b3f45','charcoal',180,{short:true}],
-  ['Black tailored trousers', 'bottom',   'bottom',    '#1a1a1a','black',   85, null],
-  ['Dark indigo jeans',       'bottom',   'bottom',    '#4a6b8a','denim',   75, {denim:true}],
-  ['Tan chino trousers',      'bottom',   'bottom',    '#b08a5f','tan',     58, null],
-  ['Black pleated skirt',     'bottom',   'skirt',     '#1a1a1a','black',   62, null],
-  ['Teal midi dress',         'dress',    'dress',     '#2f7f7a','teal',    95, null],
-  ['Black chelsea boots',     'footwear', 'boot',      '#1a1a1a','black',  150, null],
-  ['White leather sneakers',  'footwear', 'sneaker',   '#f5f5f0','white',   80, null],
-  ['Brown leather loafers',   'footwear', 'shoe',      '#6b4a30','brown',  120, null],
+  ['White oxford shirt',         'top',        'top',         '#f5f5f0','white',      {placket:true}],
+  ['Grey wool jumper',           'top',        'knit',        '#8a8a86','grey',       null],
+  ['Navy merino knit',           'top',        'knit',        '#1f2b4d','navy',       null],
+  ['Black cotton t-shirt',       'top',        'top',         '#1a1a1a','black',      {short:true}],
+  ['Burgundy linen shirt',       'top',        'top',         '#5c1f2e','burgundy',   {placket:true}],
+  ['Navy wool overcoat',         'outerwear',  'outerwear',   '#1f2b4d','navy',       null],
+  ['Olive field jacket',         'outerwear',  'outerwear',   '#6b7c3a','olive',      {short:true}],
+  ['Charcoal wool blazer',       'outerwear',  'outerwear',   '#3b3f45','charcoal',   {short:true}],
+  ['Black tailored trousers',    'bottom',     'bottom',      '#1a1a1a','black',      null],
+  ['Dark indigo jeans',          'bottom',     'bottom',      '#4a6b8a','denim',      {denim:true}],
+  ['Tan chino trousers',         'bottom',     'bottom',      '#b08a5f','tan',        null],
+  ['Black pleated skirt',        'bottom',     'skirt',       '#1a1a1a','black',      null],
+  ['Teal midi dress',            'dress',      'dress',       '#2f7f7a','teal',       null],
+  ['Black chelsea boots',        'footwear',   'boot',        '#1a1a1a','black',      null],
+  ['White leather sneakers',     'footwear',   'sneaker',     '#f5f5f0','white',      null],
+  ['Brown leather loafers',      'footwear',   'shoe',        '#6b4a30','brown',      null],
   /* Without these the Sport occasion has nothing to work with and quietly
      recommends the least formal of everything else, which is how a midi dress
      ended up suggested for the gym. */
-  ['Grey running t-shirt',    'top',      'top',       '#8a8a86','grey',    28, {short:true}],
-  ['Black training shorts',   'bottom',   'bottom',    '#1a1a1a','black',   32, null],
-  ['Navy gym hoodie',         'top',      'knit',      '#1f2b4d','navy',    55, null],
-  ['Black running trainers',  'footwear', 'sneaker',   '#1a1a1a','black',   95, null]
+  ['Grey running t-shirt',       'top',        'top',         '#8a8a86','grey',       {short:true}],
+  ['Black training shorts',      'bottom',     'bottom',      '#1a1a1a','black',      null],
+  ['Navy gym hoodie',            'top',        'knit',        '#1f2b4d','navy',       null],
+  ['Black running trainers',     'footwear',   'sneaker',     '#1a1a1a','black',      null]
 ];
 
 function demoWardrobeCount(){
@@ -4649,16 +4602,16 @@ async function loadDemoWardrobe(){
     return {
       id: 'demo_'+now+'_'+idx,
       name: p[0], category: p[1], color: p[4],
-      image: drawDemoGarment(p[2], p[3], p[6]),
+      image: drawDemoGarment(p[2], p[3], p[5]),
       warmth: inf.warmth, formality: inf.formality, tags: inf.tags,
-      brand: null, price: p[5], favourite: false,
+      brand: null, favourite: false,
       createdAt: now - (DEMO_PIECES.length - idx) * 86400000,
       demo: true
     };
   });
   state.items = state.items.concat(made);
 
-  /* A wardrobe with no history cannot show cost per wear, rotation or a
+  /* A wardrobe with no history cannot show rotation, dormant pieces or a
      streak, so give it a plausible past: recent days worn more often than
      old ones, and a few pieces deliberately left untouched so "gathering
      dust" and the never-worn count have something true to report. */
@@ -4737,14 +4690,11 @@ function renderSettingsBody(){
 
     + '<div class="settings-block">'
     +   '<div class="sb-title">Preferences</div>'
-    +   '<label class="field" style="margin-top:10px;"><span>Currency symbol</span>'
-    +     '<input type="text" id="currencyInput" maxlength="3" value="'+escapeHtml(state.currency)+'"></label>'
     +   '<div class="gap-toggle-row" style="border-top:none;padding-top:0;">'
     +     '<div class="t-txt"><div class="t-name">Cut out backgrounds by default</div>'
     +     '<div class="t-sub">Applies to new photos. You can flip it per photo while reviewing.</div></div>'
     +     '<button class="switch '+(state.cutout?'on':'')+'" id="settingsCutout"></button>'
     +   '</div>'
-    +   '<button class="btn-primary" id="savePrefsBtn" style="margin-top:8px;">Save preferences</button>'
     + '</div>'
 
     + '<div class="settings-block">'
@@ -4771,7 +4721,7 @@ function renderSettingsBody(){
           + 'Removing them leaves anything you added yourself untouched.</div>'
           + '<button class="btn-secondary" id="demoRemoveBtn" style="margin-top:10px;">Remove demo pieces</button>'
         : '<div class="sb-sub">Fills the rail with twenty pieces and a month of wear history, so you can see suggestions, '
-          + 'planning and cost per wear working before photographing anything. They are drawn, not photographed, and '
+          + 'planning and your rotation working before photographing anything. They are drawn, not photographed, and '
           + 'they sit alongside your own things until you remove them.</div>'
           + '<button class="btn-secondary" id="demoLoadBtn" style="margin-top:10px;">Add demo pieces</button>')
     + '</div>';
@@ -4792,19 +4742,13 @@ function bindSettingsHandlers(){
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
 
+  /* A switch is expected to take effect the moment it is flipped. It only
+     needed a Save button while it shared the block with a text field. */
   const cutoutBtn = document.getElementById('settingsCutout');
-  if(cutoutBtn) cutoutBtn.onclick = function(){
+  if(cutoutBtn) cutoutBtn.onclick = async function(){
     state.cutout = !state.cutout;
     cutoutBtn.classList.toggle('on', state.cutout);
-  };
-
-  const prefsBtn = document.getElementById('savePrefsBtn');
-  if(prefsBtn) prefsBtn.onclick = async function(){
-    const cur = document.getElementById('currencyInput').value.trim();
-    state.currency = cur || '£';
     await savePrefs();
-    render();
-    toast('Preferences saved');
   };
 
   const demoLoad = document.getElementById('demoLoadBtn');
