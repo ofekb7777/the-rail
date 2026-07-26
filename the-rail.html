@@ -875,10 +875,16 @@ function harmonyBetween(n1, n2){
   return {rule:'Contrasting', note:'A wide but not opposite gap — deliberate and a little unexpected.'};
 }
 
+/* Neutral combinations were rated as also-rans, which does not survive contact
+   with how people actually dress: head-to-toe black and grey-on-charcoal are
+   among the most dependable outfits there are, and most wardrobes are mostly
+   neutral. Rating them near the bottom quietly pushed every suggestion toward
+   a colour pop and made ordinary, correct outfits look like compromises.
+   A deliberate colour relationship still edges ahead -- but not by a chasm. */
 const HARMONY_SCORE = {
-  'Complementary':5, 'Analogous':4.5, 'Neutral anchor':4.5,
-  'High-contrast neutrals':4, 'Tonal':3.5, 'Triadic':3,
-  'Neutral pair':3, 'Monochrome':2.5, 'Contrasting':1
+  'Complementary':5, 'Analogous':4.6, 'Neutral anchor':4.6,
+  'High-contrast neutrals':4.5, 'Tonal':4.2, 'Neutral pair':4,
+  'Monochrome':3.8, 'Triadic':3, 'Contrasting':1
 };
 
 /* For an anchor colour, sort every other palette colour by how well it pairs. */
@@ -985,7 +991,8 @@ const MODIFIERS = [
   {re:/(silk|satin|velvet|sequin|tailored|pinstripe|formal|smart)/,        form:1.2},
   {re:/(distressed|ripped|faded|washed|vintage|oversized|baggy|graphic)/,  form:-0.8},
   {re:/(gym|running|training|sport|athletic|performance|dri[- ]?fit)/,     form:-1.2, tag:'sport'},
-  {re:/(waterproof|water[- ]?resistant|gore[- ]?tex|rain)/,                tag:'rain'},
+  /* \b before rain, or "training" and "trainers" come back waterproof. */
+  {re:/(waterproof|water[- ]?resistant|gore[- ]?tex|\brain)/,              tag:'rain'},
   {re:/(sleeveless|short ?sleeve|cropped)/,                                warm:-0.6},
   {re:/(long ?sleeve|high ?neck|turtle)/,                                  warm:0.4}
 ];
@@ -1949,6 +1956,17 @@ function formalityScore(items, prof){
   let s = 5 - 2.2*Math.abs(mean - prof.form);
   if(range > prof.spread) s -= 1.3*(range - prof.spread);
 
+  /* A mean forgives its outliers. Gym trainers pull a midi dress down to an
+     average that looks reasonable for Sport, so the dress never answers for
+     itself. An outfit is only as appropriate as its least appropriate piece,
+     so the worst offender is charged separately from the average. */
+  let worst = 0;
+  for(let i=0;i<f.length;i++){
+    const dev = Math.abs(f[i] - prof.form);
+    if(dev > worst) worst = dev;
+  }
+  if(worst > 1.2) s -= 1.6*(worst - 1.2);
+
   /* an occasion can also rule tags out entirely */
   if(prof.avoid){
     items.forEach(function(i){
@@ -2174,7 +2192,17 @@ function generateLooks(opts){
   }
   if(!candidates.length) return [];
 
-  let scored = candidates.map(function(items){
+  /* The same outfit can be reached by more than one route -- a dress plus
+     shoes is built both by the dress path and by the generic pairing pass --
+     and identical sets of clothes arriving as separate objects survive any
+     check made by identity. Collapse them on what they contain. */
+  const comboSeen = {};
+  let scored = candidates.filter(function(items){
+    const sig = items.map(function(i){ return i.id; }).sort().join('|');
+    if(comboSeen[sig]) return false;
+    comboSeen[sig] = true;
+    return true;
+  }).map(function(items){
     return {items:items, score: scoreLook(items, ctx)};
   }).sort(function(a,b){ return b.score.total - a.score.total; }).slice(0, 60);
 
@@ -2214,9 +2242,16 @@ function generateLooks(opts){
     });
     if(!tooSimilar) chosen.push(cand);
   }
-  /* if the wardrobe is small there may not be enough variety — top up */
+  /* if the wardrobe is small there may not be enough variety — top up, but
+     relaxing the similarity rule must not relax it all the way to letting the
+     identical outfit through twice */
   for(let i=0; i<scored.length && chosen.length<want; i++){
-    if(chosen.indexOf(scored[i]) === -1) chosen.push(scored[i]);
+    if(chosen.indexOf(scored[i]) > -1) continue;
+    const sig = scored[i].items.map(function(x){ return x.id; }).sort().join('|');
+    const dup = chosen.some(function(ch){
+      return ch.items.map(function(x){ return x.id; }).sort().join('|') === sig;
+    });
+    if(!dup) chosen.push(scored[i]);
   }
 
   /* Two looks landing on the same title makes the deck feel broken, so any
@@ -4355,6 +4390,330 @@ document.getElementById('saveBatchBtn').onclick = async function(){
 };
 
 /* ============================================================
+   DEMO WARDROBE — an empty app cannot show what it does, and
+   photographing a whole wardrobe before you can try anything is
+   a lot to ask. These pieces are drawn on a canvas at load time
+   rather than shipped as files, so they cost nothing until asked
+   for. Every one is tagged so it can be removed in one go.
+   ============================================================ */
+function demoShade(hex, amt){
+  const n = parseInt(hex.slice(1),16);
+  const c = [(n>>16)&255, (n>>8)&255, n&255].map(function(v){
+    return Math.max(0, Math.min(255, Math.round(v+amt)));
+  });
+  return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+}
+function demoDrape(ctx, hex, x, y, w, h){
+  const g = ctx.createLinearGradient(x, y, x+w, y+h);
+  g.addColorStop(0,    demoShade(hex,  26));
+  g.addColorStop(0.35, demoShade(hex,   6));
+  g.addColorStop(0.62, demoShade(hex, -10));
+  g.addColorStop(1,    demoShade(hex, -34));
+  return g;
+}
+const DEMO_SHAPES = {
+  top: function(ctx,hex,W,H,o){
+    const cx=W/2, top=H*0.20, bot=H*0.80, sh=W*0.30, hem=W*0.26;
+    const short = o && o.short;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-sh,top,sh*2,bot-top);
+    [-1,1].forEach(function(s){
+      ctx.beginPath();
+      ctx.moveTo(cx+s*sh, top+H*0.02);
+      ctx.lineTo(cx+s*(sh+W*0.14), top+H*(short?0.14:0.30));
+      ctx.lineTo(cx+s*(sh+W*0.05), top+H*(short?0.17:0.34));
+      ctx.lineTo(cx+s*(sh-W*0.02), top+H*0.10);
+      ctx.closePath(); ctx.fill();
+    });
+    ctx.beginPath();
+    ctx.moveTo(cx-sh, top); ctx.lineTo(cx+sh, top);
+    ctx.lineTo(cx+hem, bot); ctx.lineTo(cx-hem, bot);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-28);
+    ctx.beginPath(); ctx.ellipse(cx, top+H*0.012, W*0.105, H*0.032, 0,0,7); ctx.fill();
+    if(o && o.placket){
+      ctx.strokeStyle = demoShade(hex,-42); ctx.lineWidth = Math.max(1,W*0.006);
+      ctx.beginPath(); ctx.moveTo(cx, top+H*0.06); ctx.lineTo(cx, bot); ctx.stroke();
+    }
+  },
+  knit: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.19, bot=H*0.79, sh=W*0.325;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-sh,top,sh*2,bot-top);
+    [-1,1].forEach(function(s){
+      ctx.beginPath();
+      ctx.moveTo(cx+s*sh, top+H*0.02);
+      ctx.lineTo(cx+s*(sh+W*0.15), top+H*0.32);
+      ctx.lineTo(cx+s*(sh+W*0.04), top+H*0.36);
+      ctx.lineTo(cx+s*(sh-W*0.03), top+H*0.10);
+      ctx.closePath(); ctx.fill();
+    });
+    ctx.beginPath();
+    ctx.moveTo(cx-sh, top); ctx.lineTo(cx+sh, top);
+    ctx.lineTo(cx+W*0.30, bot); ctx.lineTo(cx-W*0.30, bot);
+    ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.globalAlpha=0.13; ctx.strokeStyle=demoShade(hex,-55);
+    ctx.lineWidth=Math.max(1,W*0.012);
+    for(let x=cx-sh+W*0.04; x<cx+sh; x+=W*0.055){
+      ctx.beginPath(); ctx.moveTo(x, top+H*0.04); ctx.lineTo(x, bot-H*0.03); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = demoShade(hex,-30);
+    ctx.beginPath(); ctx.ellipse(cx, top+H*0.015, W*0.115, H*0.035, 0,0,7); ctx.fill();
+  },
+  outerwear: function(ctx,hex,W,H,o){
+    const cx=W/2, top=H*0.13, bot=(o&&o.short)?H*0.66:H*0.90, sh=W*0.33;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-sh,top,sh*2,bot-top);
+    [-1,1].forEach(function(s){
+      ctx.beginPath();
+      ctx.moveTo(cx+s*sh, top+H*0.02);
+      ctx.lineTo(cx+s*(sh+W*0.13), top+H*((o&&o.short)?0.30:0.40));
+      ctx.lineTo(cx+s*(sh+W*0.02), top+H*((o&&o.short)?0.34:0.44));
+      ctx.lineTo(cx+s*(sh-W*0.04), top+H*0.10);
+      ctx.closePath(); ctx.fill();
+    });
+    ctx.beginPath();
+    ctx.moveTo(cx-sh, top); ctx.lineTo(cx+sh, top);
+    ctx.lineTo(cx+W*0.31, bot); ctx.lineTo(cx-W*0.31, bot);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-32);
+    [-1,1].forEach(function(s){
+      ctx.beginPath();
+      ctx.moveTo(cx+s*W*0.11, top); ctx.lineTo(cx, top+H*0.20);
+      ctx.lineTo(cx+s*W*0.02, top+H*0.22); ctx.lineTo(cx+s*W*0.17, top+H*0.03);
+      ctx.closePath(); ctx.fill();
+    });
+    ctx.fillStyle = demoShade(hex,-60);
+    for(let i=0;i<3;i++){
+      ctx.beginPath();
+      ctx.arc(cx-W*0.045, top+H*(0.26+i*0.15), Math.max(1.5,W*0.016), 0, 7); ctx.fill();
+    }
+  },
+  bottom: function(ctx,hex,W,H,o){
+    const cx=W/2, top=H*0.16, bot=H*0.92, waist=W*0.22, leg=W*0.098, gap=W*0.022;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-waist,top,waist*2,bot-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-waist, top); ctx.lineTo(cx+waist, top);
+    ctx.lineTo(cx+waist*0.92, top+H*0.16);
+    ctx.lineTo(cx+leg+gap, bot); ctx.lineTo(cx+gap, bot);
+    ctx.lineTo(cx, top+H*0.30);
+    ctx.lineTo(cx-gap, bot); ctx.lineTo(cx-leg-gap, bot);
+    ctx.lineTo(cx-waist*0.92, top+H*0.16);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-26);
+    ctx.fillRect(cx-waist, top, waist*2, H*0.035);
+    if(o && o.denim){
+      ctx.save(); ctx.globalAlpha=0.5; ctx.strokeStyle='#d9b98a';
+      ctx.lineWidth=Math.max(1,W*0.005); ctx.setLineDash([W*0.012, W*0.012]);
+      [-1,1].forEach(function(s){
+        ctx.beginPath();
+        ctx.moveTo(cx+s*(waist-W*0.02), top+H*0.04);
+        ctx.lineTo(cx+s*(waist-W*0.02), bot-H*0.02); ctx.stroke();
+      });
+      ctx.restore();
+    }
+  },
+  skirt: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.22, bot=H*0.74;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.30,top,W*0.60,bot-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.19, top); ctx.lineTo(cx+W*0.19, top);
+    ctx.lineTo(cx+W*0.31, bot); ctx.lineTo(cx-W*0.31, bot);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-26);
+    ctx.fillRect(cx-W*0.19, top, W*0.38, H*0.035);
+    ctx.save(); ctx.globalAlpha=0.16; ctx.strokeStyle=demoShade(hex,-60);
+    ctx.lineWidth=Math.max(1,W*0.007);
+    for(let i=-3;i<=3;i++){
+      ctx.beginPath();
+      ctx.moveTo(cx+i*W*0.05, top+H*0.04);
+      ctx.lineTo(cx+i*W*0.082, bot); ctx.stroke();
+    }
+    ctx.restore();
+  },
+  dress: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.17, waist=H*0.45, bot=H*0.85;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.30,top,W*0.60,bot-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.20, top); ctx.lineTo(cx+W*0.20, top);
+    ctx.lineTo(cx+W*0.155, waist);
+    ctx.lineTo(cx+W*0.32, bot); ctx.lineTo(cx-W*0.32, bot);
+    ctx.lineTo(cx-W*0.155, waist);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-28);
+    ctx.beginPath(); ctx.ellipse(cx, top+H*0.008, W*0.115, H*0.03, 0,0,7); ctx.fill();
+  },
+  boot: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.24, ankle=H*0.62, sole=H*0.80;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.20,top,W*0.42,sole-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.13, top); ctx.lineTo(cx+W*0.10, top);
+    ctx.lineTo(cx+W*0.115, ankle);
+    ctx.lineTo(cx+W*0.30, ankle+H*0.10);
+    ctx.lineTo(cx+W*0.31, sole); ctx.lineTo(cx-W*0.15, sole);
+    ctx.lineTo(cx-W*0.155, ankle);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-38);
+    ctx.fillRect(cx+W*0.02, top+H*0.03, W*0.06, H*0.26);
+    ctx.fillStyle = demoShade(hex,-62);
+    ctx.fillRect(cx-W*0.16, sole, W*0.48, H*0.045);
+  },
+  sneaker: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.40, sole=H*0.70;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.28,top,W*0.56,sole-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.20, sole);
+    ctx.quadraticCurveTo(cx-W*0.22, top+H*0.02, cx-W*0.02, top);
+    ctx.lineTo(cx+W*0.06, top+H*0.01);
+    ctx.quadraticCurveTo(cx+W*0.20, top+H*0.06, cx+W*0.30, sole);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = demoShade(hex, 62); ctx.lineWidth=Math.max(1,W*0.008);
+    for(let i=0;i<4;i++){
+      const y = top+H*0.03+i*H*0.055;
+      ctx.beginPath();
+      ctx.moveTo(cx-W*0.10+i*W*0.012, y);
+      ctx.lineTo(cx+W*0.03+i*W*0.020, y-H*0.012); ctx.stroke();
+    }
+    ctx.fillStyle = demoShade(hex, 40);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.21, sole-H*0.01); ctx.lineTo(cx+W*0.305, sole-H*0.01);
+    ctx.lineTo(cx+W*0.30, sole+H*0.05); ctx.lineTo(cx-W*0.20, sole+H*0.05);
+    ctx.closePath(); ctx.fill();
+  },
+  shoe: function(ctx,hex,W,H){
+    const cx=W/2, top=H*0.46, sole=H*0.68;
+    ctx.fillStyle = demoDrape(ctx,hex,cx-W*0.26,top,W*0.52,sole-top);
+    ctx.beginPath();
+    ctx.moveTo(cx-W*0.18, sole);
+    ctx.quadraticCurveTo(cx-W*0.19, top+H*0.01, cx-W*0.01, top);
+    ctx.quadraticCurveTo(cx+W*0.19, top+H*0.05, cx+W*0.28, sole);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = demoShade(hex,-58);
+    ctx.fillRect(cx-W*0.19, sole, W*0.475, H*0.032);
+  }
+};
+
+function drawDemoGarment(shape, hex, opt){
+  const S = 440;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0,0,0,S);
+  g.addColorStop(0,'#ffffff'); g.addColorStop(0.7,'#f4f2ee'); g.addColorStop(1,'#e8e4dc');
+  ctx.fillStyle=g; ctx.fillRect(0,0,S,S);
+  ctx.save();
+  ctx.globalAlpha=0.22; ctx.filter='blur(9px)'; ctx.fillStyle='#000';
+  ctx.beginPath(); ctx.ellipse(S/2+S*0.03, S*0.86, S*0.29, S*0.042, 0,0,7); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.30)'; ctx.shadowBlur=S*0.035;
+  ctx.shadowOffsetX=S*0.012; ctx.shadowOffsetY=S*0.016;
+  (DEMO_SHAPES[shape]||DEMO_SHAPES.top)(ctx, hex, S, S, opt||{});
+  ctx.restore();
+  return c.toDataURL('image/jpeg', 0.82);
+}
+
+/* name, category, shape, hex, colour, price, drawing options */
+const DEMO_PIECES = [
+  ['White oxford shirt',      'top',      'top',       '#f5f5f0','white',   45, {placket:true}],
+  ['Grey wool jumper',        'top',      'knit',      '#8a8a86','grey',    68, null],
+  ['Navy merino knit',        'top',      'knit',      '#1f2b4d','navy',    72, null],
+  ['Black cotton t-shirt',    'top',      'top',       '#1a1a1a','black',   18, {short:true}],
+  ['Burgundy linen shirt',    'top',      'top',       '#5c1f2e','burgundy',52, {placket:true}],
+  ['Navy wool overcoat',      'outerwear','outerwear', '#1f2b4d','navy',   240, null],
+  ['Olive field jacket',      'outerwear','outerwear', '#6b7c3a','olive',  130, {short:true}],
+  ['Charcoal wool blazer',    'outerwear','outerwear', '#3b3f45','charcoal',180,{short:true}],
+  ['Black tailored trousers', 'bottom',   'bottom',    '#1a1a1a','black',   85, null],
+  ['Dark indigo jeans',       'bottom',   'bottom',    '#4a6b8a','denim',   75, {denim:true}],
+  ['Tan chino trousers',      'bottom',   'bottom',    '#b08a5f','tan',     58, null],
+  ['Black pleated skirt',     'bottom',   'skirt',     '#1a1a1a','black',   62, null],
+  ['Teal midi dress',         'dress',    'dress',     '#2f7f7a','teal',    95, null],
+  ['Black chelsea boots',     'footwear', 'boot',      '#1a1a1a','black',  150, null],
+  ['White leather sneakers',  'footwear', 'sneaker',   '#f5f5f0','white',   80, null],
+  ['Brown leather loafers',   'footwear', 'shoe',      '#6b4a30','brown',  120, null],
+  /* Without these the Sport occasion has nothing to work with and quietly
+     recommends the least formal of everything else, which is how a midi dress
+     ended up suggested for the gym. */
+  ['Grey running t-shirt',    'top',      'top',       '#8a8a86','grey',    28, {short:true}],
+  ['Black training shorts',   'bottom',   'bottom',    '#1a1a1a','black',   32, null],
+  ['Navy gym hoodie',         'top',      'knit',      '#1f2b4d','navy',    55, null],
+  ['Black running trainers',  'footwear', 'sneaker',   '#1a1a1a','black',   95, null]
+];
+
+function demoWardrobeCount(){
+  return state.items.filter(function(i){ return i.demo; }).length;
+}
+
+async function loadDemoWardrobe(){
+  const now = Date.now();
+  const made = DEMO_PIECES.map(function(p, idx){
+    const inf = inferAttributes(p[0], p[1]);
+    return {
+      id: 'demo_'+now+'_'+idx,
+      name: p[0], category: p[1], color: p[4],
+      image: drawDemoGarment(p[2], p[3], p[6]),
+      warmth: inf.warmth, formality: inf.formality, tags: inf.tags,
+      brand: null, price: p[5], favourite: false,
+      createdAt: now - (DEMO_PIECES.length - idx) * 86400000,
+      demo: true
+    };
+  });
+  state.items = state.items.concat(made);
+
+  /* A wardrobe with no history cannot show cost per wear, rotation or a
+     streak, so give it a plausible past: recent days worn more often than
+     old ones, and a few pieces deliberately left untouched so "gathering
+     dust" and the never-worn count have something true to report. */
+  const byCat = function(c){ return made.filter(function(i){ return i.category===c; }); };
+  const tops = byCat('top'), bottoms = byCat('bottom'), shoes = byCat('footwear');
+  const outer = byCat('outerwear');
+  const idle = {};
+  idle[made[4].id] = true;   /* burgundy linen shirt */
+  idle[made[12].id] = true;  /* teal midi dress */
+  idle[made[11].id] = true;  /* black pleated skirt */
+
+  let seed = 20260726;
+  const rnd = function(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed/0x7fffffff; };
+  const pick = function(arr){
+    const ok = arr.filter(function(i){ return !idle[i.id]; });
+    return ok[Math.floor(rnd()*ok.length)] || arr[0];
+  };
+
+  const today = parseKey(todayKey());
+  for(let back=34; back>=0; back--){
+    if(back > 6 && rnd() > 0.55) continue;      /* older weeks are patchier */
+    if(back <= 6 && rnd() > 0.85) continue;     /* this week nearly complete */
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate()-back);
+    const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const ids = [pick(tops).id, pick(bottoms).id, pick(shoes).id];
+    if(rnd() > 0.6) ids.push(pick(outer).id);
+    state.wearLog.push({date:key, itemIds:ids, title:''});
+  }
+  state.wearLog.sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+
+  await saveItems(); await saveWearLog();
+  render();
+  toast('Added '+made.length+' demo pieces');
+}
+
+async function removeDemoWardrobe(){
+  const ids = {};
+  state.items.forEach(function(i){ if(i.demo) ids[i.id] = true; });
+  state.items  = state.items.filter(function(i){ return !i.demo; });
+  state.wearLog = state.wearLog.filter(function(w){
+    return !w.itemIds.some(function(id){ return ids[id]; });
+  });
+  state.outfits = state.outfits.filter(function(o){
+    return !(o.itemIds||[]).some(function(id){ return ids[id]; });
+  });
+  Object.keys(state.plans).forEach(function(k){
+    if((state.plans[k].itemIds||[]).some(function(id){ return ids[id]; })) delete state.plans[k];
+  });
+  clearImgCache();
+  await saveItems(); await saveWearLog(); await saveOutfits(); await savePlans();
+  render();
+  toast('Demo pieces removed');
+}
+
+/* ============================================================
    SETTINGS
    ============================================================ */
 function renderSettingsBody(){
@@ -4403,6 +4762,18 @@ function renderSettingsBody(){
     +   '<div class="sb-title">Re-read the wardrobe</div>'
     +   '<div class="sb-sub">Re-runs the keyword pass over every piece to refresh warmth and formality. Anything you set by hand is left alone.</div>'
     +   '<button class="btn-secondary" id="reinferBtn" style="margin-top:8px;">Re-guess attributes</button>'
+    + '</div>'
+
+    + '<div class="settings-block">'
+    +   '<div class="sb-title">Demo wardrobe</div>'
+    +   (demoWardrobeCount()
+        ? '<div class="sb-sub">'+demoWardrobeCount()+' demo pieces are in your wardrobe, along with the wear history that came with them. '
+          + 'Removing them leaves anything you added yourself untouched.</div>'
+          + '<button class="btn-secondary" id="demoRemoveBtn" style="margin-top:10px;">Remove demo pieces</button>'
+        : '<div class="sb-sub">Fills the rail with twenty pieces and a month of wear history, so you can see suggestions, '
+          + 'planning and cost per wear working before photographing anything. They are drawn, not photographed, and '
+          + 'they sit alongside your own things until you remove them.</div>'
+          + '<button class="btn-secondary" id="demoLoadBtn" style="margin-top:10px;">Add demo pieces</button>')
     + '</div>';
 
   storageEstimate().then(function(s){
@@ -4434,6 +4805,22 @@ function bindSettingsHandlers(){
     await savePrefs();
     render();
     toast('Preferences saved');
+  };
+
+  const demoLoad = document.getElementById('demoLoadBtn');
+  if(demoLoad) demoLoad.onclick = async function(){
+    this.disabled = true; this.textContent = 'Drawing…';
+    try{ await loadDemoWardrobe(); }
+    catch(e){ console.error('demo load failed', e); toast('Could not add demo pieces'); }
+    renderSettingsBody();
+  };
+
+  const demoRemove = document.getElementById('demoRemoveBtn');
+  if(demoRemove) demoRemove.onclick = async function(){
+    this.disabled = true; this.textContent = 'Removing…';
+    try{ await removeDemoWardrobe(); }
+    catch(e){ console.error('demo remove failed', e); toast('Could not remove demo pieces'); }
+    renderSettingsBody();
   };
 
   const reinfer = document.getElementById('reinferBtn');

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>garment render test</title>
+<style>
+body{background:#1b2130;color:#efe8d8;font:13px system-ui;margin:0;padding:16px}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin:18px 0 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+figure{margin:0}
+img{width:100%;display:block;border-radius:6px;background:#000}
+figcaption{font-size:11px;opacity:.75;margin-top:4px}
+.ok{color:#7c9473}.bad{color:#b23a48}
+</style></head><body>
+<div id="out">rendering…</div>
+<script src="/_gen.js"></script>
+<script>
+const SPECS = [
+  ['White oxford shirt',        'shirt',    '#f5f5f0', 'white',    'studio'],
+  ['Navy wool overcoat',        'coat',     '#1f2b4d', 'navy',     'wall'],
+  ['Black tailored trousers',   'trousers', '#1a1a1a', 'black',    'studio'],
+  ['Black chelsea boots',       'boot',     '#1a1a1a', 'black',    'wood'],
+  ['Dark indigo jeans',         'trousers', '#4a6b8a', 'denim',    'bed'],
+  ['Grey wool jumper',          'knit',     '#8a8a86', 'grey',     'studio'],
+  ['White leather sneakers',    'sneaker',  '#f5f5f0', 'white',    'wood'],
+  ['Olive field jacket',        'coat',     '#6b7c3a', 'olive',    'wall'],
+  ['Burgundy knit jumper',      'knit',     '#5c1f2e', 'burgundy', 'studio'],
+  ['Cream linen shirt',         'shirt',    '#efe6d3', 'cream',    'bed'],
+  ['Tan chino trousers',        'trousers', '#b08a5f', 'tan',      'studio'],
+  ['Charcoal wool blazer',      'coat',     '#3b3f45', 'charcoal', 'wall'],
+  ['Rust orange t-shirt',       'tshirt',   '#c96a2a', 'orange',   'studio'],
+  ['Forest green knit',         'knit',     '#3f7a4a', 'green',    'dark'],
+  ['Brown leather loafers',     'shoe',     '#6b4a30', 'brown',    'wood'],
+  ['Mustard corduroy trousers', 'trousers', '#c9a03a', 'mustard',  'studio'],
+  ['Teal midi dress',           'dress',    '#2f7f7a', 'teal',     'wall'],
+  ['Black pleated skirt',       'skirt',    '#1a1a1a', 'black',    'studio'],
+  ['Red cotton t-shirt',        'tshirt',   '#a83232', 'red',      'bed'],
+  ['Beige trench coat',         'coat',     '#d8c9a8', 'beige',    'wall'],
+];
+
+const out = document.getElementById('out');
+out.innerHTML = '<h2>All shapes &times; backdrops</h2><div class="grid" id="g"></div>';
+const g = document.getElementById('g');
+let html = '';
+const t0 = performance.now();
+let bytes = 0;
+SPECS.forEach(function(s){
+  const url = renderGarment({shape:s[1], hex:s[2], backdrop:s[4], size:512});
+  bytes += url.length;
+  html += '<figure><img src="'+url+'"><figcaption>'+s[0]
+        + '<br><span style="opacity:.55">'+s[1]+' / '+s[4]+' / want <b>'+s[3]+'</b></span></figcaption></figure>';
+});
+g.innerHTML = html;
+const ms = Math.round(performance.now()-t0);
+document.title = 'rendered '+SPECS.length+' in '+ms+'ms';
+out.insertAdjacentHTML('afterbegin',
+  '<div>Rendered <b>'+SPECS.length+'</b> garments in <b>'+ms+'ms</b> ('
+  + Math.round(ms/SPECS.length)+'ms each, avg '+Math.round(bytes/SPECS.length/1024)+'KB)</div>');
+window.__SPECS = SPECS;
+</script>
+</body></html>
