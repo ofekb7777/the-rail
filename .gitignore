@@ -14,6 +14,9 @@ desktop.ini
 # Claude Code local config
 .claude/
 
+# Playwright, installed on demand by the smoke test rather than depended on
+node_modules/
+
 # Scratch harnesses used while tuning colour detection
 _gen.js
 _test.html
