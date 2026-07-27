@@ -409,7 +409,6 @@
     text-transform:uppercase; color:#5a4a1a; background:rgba(212,165,74,0.35);
     padding:2px 7px; border-radius:9px;
   }
-  .gap-see{font-size:11px; color:var(--thread); text-decoration:none; font-weight:700; display:inline-block; margin-top:6px; margin-left:8px;}
 
   .saved-flag{
     display:inline-block; font-size:11.5px; font-weight:700; color:var(--sage);
@@ -458,15 +457,13 @@
   .lb-swatches{display:flex; gap:4px; align-items:center; margin:10px 0 2px;}
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
-  .insp-links{display:flex; gap:8px; margin-top:12px;}
-  .insp-link{
-    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
-    padding:11px 8px; border-radius:9px; background:var(--ink); color:var(--bone);
-    font-size:11.5px; font-weight:700; text-decoration:none; text-align:center;
+  .why-colour{display:flex; gap:12px; align-items:center; margin-top:10px;}
+  .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
+  .wheel-wrap{flex:none; text-align:center;}
+  .wheel-rule{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; font-weight:800;
+    color:#6b6455; margin-top:2px;
   }
-  .insp-link.alt{background:transparent; color:var(--ink); border:1px solid rgba(27,33,48,0.25);}
-  .insp-caption{font-size:11px; color:#6b6455; margin-top:8px; line-height:1.5;}
-
   .combo-row{
     display:flex; gap:11px; align-items:center; padding:10px; margin-bottom:7px;
     background:rgba(255,255,255,0.04); border:1px solid var(--line); border-radius:10px;
@@ -1039,7 +1036,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.01';
+const APP_VERSION = '2026.08.02';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -3573,14 +3570,6 @@ function normalizeResult(r){
   return {outfits:[r]};
 }
 
-function buildSearchQuery(outfit){
-  const items = outfit.itemIds.map(function(id){ return state.items.find(function(i){ return i.id===id; }); }).filter(Boolean);
-  const parts = items.slice()
-    .sort(function(a,b){ return (CAT_ORDER[a.category]||9)-(CAT_ORDER[b.category]||9); })
-    .slice(0,3)
-    .map(function(i){ return i.name.toLowerCase().trim(); });
-  return (parts.join(' ') + ' outfit').replace(/\s+/g,' ').trim();
-}
 
 function renderLookbook(outfit, allowSwap){
   const items = outfit.itemIds
@@ -3614,6 +3603,106 @@ function renderLookbook(outfit, allowSwap){
   return '<div class="lookbook">'+cells+'</div>'+swatches;
 }
 
+/* A small wheel showing where this outfit's colours actually sit, and the
+   shape they make. The app already decides the rule -- complementary,
+   analogous, neutral anchor and the rest -- but "opposites on the wheel" is
+   a claim you cannot check, and a picture of it is one you can.
+
+   Position is the colour's own hue and saturation: angle around, saturation
+   outward. Neutrals therefore fall near the middle on their own, which is
+   exactly what "a neutral grounds the colour" means -- no special case
+   needed to say it. */
+function colourWheel(outfit){
+  const items = (outfit.itemIds || [])
+    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
+    .filter(Boolean);
+  const names = uniq(items.map(function(i){ return i.color; })).slice(0, 4);
+  if(names.length < 1) return '';
+
+  const R = 46, C = 52;          /* radius and centre of a 104px box */
+
+  /* Colours sit by hue around the ring and saturation outward. Anything with
+     no real hue takes the vertical line through the middle instead, ordered
+     by lightness -- dark at the bottom, pale at the top. Without that they
+     all landed on the centre in a heap, and a black-and-white outfit looked
+     identical to two greys, which is the opposite of what those two rules
+     mean.
+
+     "No real hue" is measured as RGB chroma, not HSL saturation: saturation
+     is inflated near white and near black, which had this palette's white
+     (#f5f5f0, chroma 5) reporting 20% and being drawn as a colour. Across
+     the palette, chroma runs 0-10 for the five true neutrals, then jumps to
+     28 for cream and 46 upward for everything with a hue worth placing.
+
+     The palette's own `neutral` flag is a different idea -- navy and brown
+     carry it because they ground other colours -- so it is deliberately not
+     what decides position here. */
+  const chroma = function(hex){
+    const c = hexToRgb(hex);
+    return Math.max(c.r,c.g,c.b) - Math.min(c.r,c.g,c.b);
+  };
+  const achromatic = function(name){ return chroma(colorByName(name).hex) < 18; };
+
+  const pt = function(name, nIdx, nCount){
+    const c = colorByName(name);
+    const hsl = hexToHsl(c.hex);
+    if(achromatic(name)){
+      const lift = ((hsl.l - 50) / 50) * (R - 20);
+      const nudge = nCount > 1 ? (nIdx - (nCount-1)/2) * 9 : 0;
+      return {x: C + nudge, y: C - lift, hex: c.hex, name: name, neutral: true};
+    }
+    const dist = 16 + Math.min(1, hsl.s / 72) * (R - 22);
+    const a = (hsl.h - 90) * Math.PI / 180;
+    return {x: C + Math.cos(a)*dist, y: C + Math.sin(a)*dist, hex: c.hex, name: name,
+            neutral: !!c.neutral};
+  };
+
+  const flat = names.filter(achromatic);
+  let nSeen = 0;
+  const pts = names.map(function(n){
+    return pt(n, achromatic(n) ? nSeen++ : 0, flat.length);
+  });
+
+  /* The hue ring: twelve arcs is plenty at this size and costs nothing. */
+  let ring = '';
+  for(let i=0; i<12; i++){
+    const a0 = (i*30 - 90) * Math.PI/180, a1 = ((i+1)*30 - 90) * Math.PI/180;
+    const x0 = C + Math.cos(a0)*(R-3), y0 = C + Math.sin(a0)*(R-3);
+    const x1 = C + Math.cos(a1)*(R-3), y1 = C + Math.sin(a1)*(R-3);
+    ring += '<path d="M'+x0.toFixed(1)+' '+y0.toFixed(1)+' A'+(R-3)+' '+(R-3)+' 0 0 1 '
+      + x1.toFixed(1)+' '+y1.toFixed(1)+'" stroke="hsl('+(i*30)+',62%,58%)" stroke-width="5"'
+      + ' fill="none" opacity="0.5" stroke-linecap="butt"/>';
+  }
+
+  /* The shape between the colours is the argument: a line straight across
+     for opposites, a narrow wedge for neighbours, a triangle for three. */
+  const bold = pts.filter(function(p){ return !p.neutral; });
+  let links = '';
+  const join = bold.length >= 2 ? bold : pts;
+  if(join.length >= 2){
+    const d = join.map(function(p, i){
+      return (i ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
+    }).join(' ') + (join.length > 2 ? ' Z' : '');
+    links = '<path d="' + d + '" stroke="rgba(27,33,48,0.45)" stroke-width="1.4" fill="none"'
+      + ' stroke-dasharray="3 3"/>';
+  }
+
+  const dots = pts.map(function(p){
+    return '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="7.5" fill="'+p.hex+'"'
+      + ' stroke="rgba(27,33,48,0.45)" stroke-width="1.2"><title>'+escapeHtml(p.name)+'</title></circle>';
+  }).join('');
+
+  return '<div class="wheel-wrap">'
+    + '<svg viewBox="0 0 104 104" width="104" height="104" aria-label="'
+    +   escapeHtml(names.join(', ') + ' — ' + (outfit.harmonyRule || '')) + '">'
+    +   ring
+    +   '<circle cx="'+C+'" cy="'+C+'" r="'+(R-12)+'" fill="rgba(255,255,255,0.55)"/>'
+    +   links + dots
+    + '</svg>'
+    + (outfit.harmonyRule ? '<div class="wheel-rule">'+escapeHtml(outfit.harmonyRule)+'</div>' : '')
+    + '</div>';
+}
+
 function renderOutfitResult(outfit, saved, savedIdx){
   let badge = '';
   if(outfit.harmonyRule){
@@ -3628,13 +3717,6 @@ function renderOutfitResult(outfit, saved, savedIdx){
     return '<span class="score-pill '+(p.cls||'')+'">'+escapeHtml(p.text)+'</span>';
   }).join('');
 
-  const q = encodeURIComponent(buildSearchQuery(outfit));
-  const inspiration = '<div class="insp-links">'
-    + '<a class="insp-link" href="https://www.pinterest.com/search/pins/?q='+q+'" target="_blank" rel="noopener">Pinterest ↗</a>'
-    + '<a class="insp-link alt" href="https://www.google.com/search?tbm=isch&q='+q+'" target="_blank" rel="noopener">Image search ↗</a>'
-    + '</div>'
-    + '<div class="insp-caption">Opens real outfit photos for this exact combination.</div>';
-
   const stamp = saved ? 'saved' : (outfit.percent!=null ? outfit.percent+'% fit' : "today's pick");
 
   return '<div class="outfit-result">'
@@ -3645,8 +3727,12 @@ function renderOutfitResult(outfit, saved, savedIdx){
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
     + (pills ? '<div class="score-strip">'+pills+'</div>' : '')
-    + (outfit.colorNote ? '<div class="outfit-reasoning" style="margin-top:8px; font-size:12.5px; color:#5a5445;">'+escapeHtml(outfit.colorNote)+'</div>' : '')
-    + inspiration
+    + (outfit.colorNote
+        ? '<div class="why-colour">'
+          +   colourWheel(outfit)
+          +   '<div class="why-txt">'+escapeHtml(outfit.colorNote)+'</div>'
+          + '</div>'
+        : '')
     + (saved || outfit.__saved
         ? '<div class="saved-flag">✓ Saved to your looks</div>'
           + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
@@ -3712,14 +3798,12 @@ function renderGapResult(){
     + blockers
     + g.gaps.map(function(x){
         const col = COLOR_BY_NAME[x.color] || null;
-        const q = encodeURIComponent((x.item+' outfit').toLowerCase());
         return '<div class="gap-row">'
           + (col ? '<span class="sw-lg" style="background:'+col.hex+';width:20px;height:20px;border-radius:5px;flex:none;margin-top:2px;"></span>' : '')
           + '<div style="flex:1;min-width:0;">'
           +   '<div class="gap-item">'+escapeHtml(x.item)+'</div>'
           +   '<div class="gap-why">'+escapeHtml(x.why||'')+'</div>'
           +   (x.unlocks > 0 ? '<span class="gap-unlock">+'+x.unlocks+' '+(x.kind||'outfits')+'</span>' : '')
-          +   '<a class="gap-see" href="https://www.pinterest.com/search/pins/?q='+q+'" target="_blank" rel="noopener">see it styled ↗</a>'
           + '</div></div>';
       }).join('')
     + '</div>';
