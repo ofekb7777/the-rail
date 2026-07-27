@@ -612,6 +612,21 @@
   .batch-cut.on{background:var(--sage); color:#101610;}
 
   .upload-hint{font-size:12px; color:rgba(239,232,216,0.5);}
+  .shot-tips{
+    border-top:1px solid var(--line); padding-top:12px; margin-top:4px;
+  }
+  .shot-tips summary{
+    font-size:12.5px; font-weight:700; color:var(--mustard); cursor:pointer;
+    list-style:none; padding:2px 0;
+  }
+  .shot-tips summary::-webkit-details-marker{display:none;}
+  .shot-tips summary::after{content:' ›'; display:inline-block; transition:transform var(--settle);}
+  .shot-tips[open] summary::after{transform:rotate(90deg);}
+  .shot-tips ul{margin:8px 0 2px; padding-left:18px;}
+  .shot-tips li{
+    font-size:12px; line-height:1.55; color:rgba(239,232,216,0.6); margin-bottom:7px;
+  }
+  .shot-tips li b{color:rgba(239,232,216,0.85); font-weight:600;}
   .add-intro{font-size:12.5px; line-height:1.55; color:rgba(239,232,216,0.6); margin-bottom:14px;}
 
   .btn-primary{
@@ -879,6 +894,35 @@
         </div>
         <button class="switch on" id="toggleCutout"></button>
       </div>
+
+      <!-- Every line here is a rule the code actually applies, in the order
+           it applies them. Written down because a shoe held up in a room
+           fails the first one, and nothing on screen used to say so. -->
+      <details class="shot-tips">
+        <summary>How to shoot so the colour and cut-out work</summary>
+        <ul>
+          <li><b>Put it down on one plain surface.</b> The app measures the very
+              edge of the photo to find the background — if a desk, a floor and a
+              wall all meet there, it gives up. A sheet of paper, a door or a
+              bedsheet is enough.</li>
+          <li><b>Leave a clear margin all round.</b> Nothing but that surface
+              should touch the frame edge — no hands, no table edge, no skirting.</li>
+          <li><b>Do not hold it.</b> A hand in the shot becomes part of the piece,
+              and skin skews the colour it reads.</li>
+          <li><b>Contrast matters.</b> Dark pieces on a pale surface, pale pieces
+              on a dark one. Black on a near-black rug reads as charcoal, and a
+              white shirt on white paper vanishes into it.</li>
+          <li><b>Fill about half the frame.</b> Too small and it is mistaken for
+              clutter; too large and there is no background left to remove.</li>
+          <li><b>Even, indirect light.</b> Daylight from a window is ideal. No
+              flash and no hard sun — blown highlights and black shadows carry no
+              colour, so they are thrown away.</li>
+          <li><b>Warm bulbs are corrected, up to a point.</b> A very orange lamp is
+              left alone rather than half-fixed, so colours will read warm. Shoot
+              by a window if you can.</li>
+          <li><b>One piece per photo</b>, shot straight on, whole thing in frame.</li>
+        </ul>
+      </details>
     </div>
 
     <div id="batchReview" style="display:none;">
@@ -970,7 +1014,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.07.30';
+const APP_VERSION = '2026.07.31';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
