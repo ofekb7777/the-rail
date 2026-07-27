@@ -595,6 +595,8 @@
   .batch-name{background:rgba(255,255,255,0.08); border:none; padding:5px 6px; color:var(--bone); border-radius:4px; font-family:'Work Sans'; font-size:11px;}
   .batch-cat{background:rgba(255,255,255,0.08); border:none; padding:4px 6px; color:var(--bone); border-radius:4px; font-family:'Work Sans'; font-size:10px;}
   .batch-colors{display:flex; gap:3px; flex-wrap:wrap;}
+  .batch-cut.retry{background:rgba(255,255,255,0.14); color:var(--bone);}
+  .batch-guess.dim{color:rgba(239,232,216,0.38); line-height:1.35;}
   .batch-color-dot{width:13px;height:13px;border-radius:3px;cursor:pointer;opacity:0.5;transition:opacity .15s,transform .15s;}
   .batch-color-dot.sel{opacity:1; transform:scale(1.2); border:1px solid var(--bone);}
   .batch-guess{
@@ -968,7 +970,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.07.29';
+const APP_VERSION = '2026.07.30';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1597,7 +1599,7 @@ function largestSurvivor(seen, w, h){
   return best;
 }
 
-function cutOutBackground(canvas){
+function cutOutBackground(canvas, opts){
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const img = ctx.getImageData(0,0,w,h);
@@ -1623,7 +1625,10 @@ function cutOutBackground(canvas){
     variance += dr*dr + dg*dg + db*db;
   });
   variance = Math.sqrt(variance/border.length);
-  if(variance > 46) return {applied:false, reason:'busy background'};
+  /* A cluttered room is not a backdrop. Flood-filling one eats the garment
+     along with the desk behind it, so by default the cut is declined -- but
+     "declined" is a judgement, and you can overrule it per photo. */
+  if(variance > 46 && !(opts && opts.force)) return {applied:false, reason:'busy background'};
 
   /* 2. flood fill from every border pixel */
   const tol = 34 + Math.min(22, variance);   /* looser when the wall is uneven */
@@ -1984,7 +1989,7 @@ function canvasToJpeg(canvas, quality){
 }
 
 /* Full pipeline for one photo. Returns everything the review card needs. */
-async function processPhoto(file, doCutout){
+async function processPhoto(file, doCutout, force){
   const img = await loadImageFromFile(file);
 
   /* analyse at a decent size — fine detail matters for colour clustering */
@@ -1996,9 +2001,9 @@ async function processPhoto(file, doCutout){
   try{ gains = estimateIlluminant(work); }
   catch(e){ console.warn('white balance failed', e); }
 
-  let cut = {applied:false};
+  let cut = {applied:false, reason:'off'};
   if(doCutout){
-    try{ cut = cutOutBackground(work); }
+    try{ cut = cutOutBackground(work, {force:force}); }
     catch(e){ console.warn('cutout failed', e); cut = {applied:false, reason:'error'}; }
   }
 
@@ -2016,7 +2021,7 @@ async function processPhoto(file, doCutout){
   const store = drawToCanvas(img, 520);
   let cutStore = {applied:false};
   if(doCutout && cut.applied){
-    try{ cutStore = cutOutBackground(store); }catch(e){}
+    try{ cutStore = cutOutBackground(store, {force:force}); }catch(e){}
   }
   const dataUrl = canvasToJpeg(store, 0.76);
 
@@ -2030,6 +2035,7 @@ async function processPhoto(file, doCutout){
     dataUrl: dataUrl,
     originalUrl: originalUrl,
     cutApplied: cutStore.applied,
+    cutReason: cutStore.applied ? null : (cut.reason || null),
     colors: colors
   };
 }
@@ -4545,13 +4551,15 @@ async function handleIncomingFiles(fileList){
   for(let n=0; n<files.length; n++){
     const slot = startAt + n;
     try{
-      const res = await processPhoto(files[n], state.cutout);
+      const res = await processPhoto(files[n], state.cutout, false);
       const top = res.colors && res.colors.length ? res.colors[0].name : 'grey';
       batchQueue[slot] = {
         dataUrl: res.dataUrl,
         originalUrl: res.originalUrl,
         cutApplied: res.cutApplied,
         cutAvailable: res.cutApplied,
+        cutReason: res.cutReason,
+        file: files[n],
         colors: res.colors || [],
         name: '',
         category: 'top',
@@ -4589,6 +4597,19 @@ function renderBatchQueue(){
   updateBatchUI();
 }
 
+/* Silence was the bug. The setting was on, the cut was declined, and nothing
+   on the card said so -- which reads exactly like a switch that does not
+   work. A photo of a shoe held up in a room has a border variance around
+   three times the limit, so for hand-held shots indoors this is the normal
+   outcome, not the rare one. */
+function cutReasonText(reason){
+  if(reason === 'busy background') return 'background kept — too cluttered to cut cleanly';
+  if(reason === 'no subject found') return 'background kept — could not find the piece';
+  if(reason === 'nothing to remove') return 'background kept — nothing to separate';
+  if(reason === 'error')             return 'background kept — the cut-out failed';
+  return 'background kept';
+}
+
 function renderBatchCard(b, idx){
   if(!b) return '';
   if(b.pending){
@@ -4604,11 +4625,15 @@ function renderBatchCard(b, idx){
   return '<div class="batch-item" data-idx="'+idx+'">'
     + '<div class="batch-check-wrap"><input type="checkbox" class="batch-check" '+(b.selected?'checked':'')+'></div>'
     + (b.cutAvailable ? '<button class="batch-cut '+(b.cutApplied?'on':'')+'">'+(b.cutApplied?'cut ✓':'cut ✗')+'</button>' : '')
+    + (!b.cutAvailable && b.cutReason && b.cutReason !== 'off'
+        ? '<button class="batch-cut retry" title="Cut it out anyway">cut ↻</button>' : '')
     + '<img src="'+(b.cutApplied ? b.dataUrl : b.originalUrl)+'" alt="">'
     + '<div class="batch-fields">'
     +   '<input type="text" class="batch-name" placeholder="'+escapeHtml(suggestion)+'" value="'+escapeHtml(b.name)+'">'
     +   '<select class="batch-cat">'+categoryOptions(b.category)+'</select>'
     +   (guesses.length ? '<div class="batch-guess">read: '+escapeHtml(b.color||'—')+'</div>' : '')
+    +   (!b.cutAvailable && b.cutReason && b.cutReason !== 'off'
+          ? '<div class="batch-guess dim">' + escapeHtml(cutReasonText(b.cutReason)) + '</div>' : '')
     +   '<div class="batch-colors">'
     +     guesses.map(function(g){
             return '<div class="batch-color-dot '+(g.name===b.color?'sel':'')+'" data-color="'+g.name+'" '
@@ -4673,13 +4698,45 @@ function bindBatchCard(card){
     };
   }
 
-  const cutBtn = card.querySelector('.batch-cut');
+  const cutBtn = card.querySelector('.batch-cut:not(.retry)');
   if(cutBtn){
     cutBtn.onclick = function(){
       b.cutApplied = !b.cutApplied;
       cutBtn.classList.toggle('on', b.cutApplied);
       cutBtn.textContent = b.cutApplied ? 'cut ✓' : 'cut ✗';
       card.querySelector('img').src = b.cutApplied ? b.dataUrl : b.originalUrl;
+    };
+  }
+
+  /* Overrule the refusal for this one photo. It may well come out badly --
+     that is why it was declined -- so the result arrives with the usual
+     toggle, already comparable against the untouched original. */
+  const retryBtn = card.querySelector('.batch-cut.retry');
+  if(retryBtn){
+    retryBtn.onclick = async function(){
+      if(!b.file) return;
+      retryBtn.disabled = true; retryBtn.textContent = '…';
+      try{
+        const res = await processPhoto(b.file, true, true);
+        if(res.cutApplied){
+          b.dataUrl = res.dataUrl;
+          b.originalUrl = res.originalUrl;
+          b.cutApplied = true;
+          b.cutAvailable = true;
+          b.cutReason = null;
+          if(res.colors && res.colors.length){
+            b.colors = res.colors;
+            b.color = res.colors[0].name;
+          }
+        }else{
+          b.cutReason = res.cutReason || 'no subject found';
+          toast('Still could not separate it from the background');
+        }
+      }catch(e){
+        b.cutReason = 'error';
+        toast('The cut-out failed on that one');
+      }
+      renderBatchQueue();
     };
   }
 }
