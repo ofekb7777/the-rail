@@ -114,6 +114,27 @@
   }
   .tab-ink.ready{opacity:1;}
 
+  /* Quiet, but not hideable: an app that is out of date should say so once
+     and keep saying it until you deal with it. */
+  .update-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px calc(16px + env(safe-area-inset-left, 0px)) 9px calc(16px + env(safe-area-inset-right, 0px));
+    background:rgba(212,165,74,0.14); border-bottom:1px solid rgba(212,165,74,0.3);
+    font-size:12px; color:var(--bone);
+  }
+  .update-bar[hidden]{display:none;}
+  .update-bar button{
+    flex:none; background:var(--mustard); color:#2a2010; border:none; border-radius:7px;
+    padding:6px 12px; font-family:'Work Sans'; font-weight:800; font-size:11.5px; cursor:pointer;
+    transition:transform var(--press);
+  }
+  .update-bar button:active{transform:scale(0.95);}
+  .ver-line{display:flex; align-items:center; gap:7px; font-size:12.5px; margin-top:2px;}
+  .ver-dot{width:8px; height:8px; border-radius:50%; flex:none;}
+  .ver-dot.ok{background:var(--sage);}
+  .ver-dot.stale{background:var(--mustard);}
+  .ver-dot.unknown{background:rgba(239,232,216,0.3);}
+
   /* One scroller: the page. This used to be flex:1 with overflow-y:auto,
      which is flex-basis 0 -- its height came from the leftover space rather
      than from its contents, so it became a scrolling box exactly one
@@ -817,6 +838,8 @@
     <div class="tab-ink" id="tabInk"></div>
   </nav>
 
+  <div class="update-bar" id="updateBar" hidden></div>
+
   <main id="main"></main>
 
   <div class="fab" id="fabWrap">
@@ -934,6 +957,12 @@ const COLORS = [
   {name:'pink',     hex:'#d9a3b0'},
   {name:'purple',   hex:'#6b4a8a'}
 ];
+
+/* What this copy of the app is. version.json on the server says what the
+   published one is; the two together are how the app can tell you whether
+   what you are looking at is current. Keep in step with version.json and the
+   cache name in sw.js -- CI fails the build if they drift. */
+const APP_VERSION = '2026.07.27';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1251,6 +1280,7 @@ let state = {
   activeOption: 0,
   swipeHintSeen: false,
   reorderHintSeen: false,
+  update: {status:'unknown', latest:null, checkedAt:0},   /* 'current' | 'stale' | 'offline' | 'unknown' */
   showGaps: false,
   gapResult: null,
   cutout: true,
@@ -1362,6 +1392,10 @@ async function loadAll(){
   if(migrated) saveItems();
 
   render();
+
+  /* A quiet check once the app is up. Deferred so it never competes with the
+     first paint or the wardrobe loading. */
+  setTimeout(function(){ checkForUpdate(false); }, 1500);
 }
 
 async function saveKey(key, value){
@@ -5247,6 +5281,29 @@ async function removeDemoWardrobe(){
 /* ============================================================
    SETTINGS
    ============================================================ */
+/* Four honest answers, not two: current, behind, unable to check, or running
+   from a file where there is nothing to check against. */
+function versionBlock(){
+  const u = state.update || {status:'unknown'};
+  const when = u.checkedAt
+    ? (Date.now() - u.checkedAt < 60000 ? 'just now'
+        : Math.round((Date.now() - u.checkedAt)/60000) + ' min ago')
+    : null;
+
+  let dot = 'unknown', line = 'Not checked yet.';
+  if(u.status === 'current'){ dot = 'ok';      line = 'You are on the latest version.'; }
+  if(u.status === 'stale'){   dot = 'stale';   line = 'Version ' + escapeHtml(u.latest || '') + ' is available.'; }
+  if(u.status === 'offline'){ dot = 'unknown'; line = 'Could not reach the server to check.'; }
+  if(u.status === 'local'){   dot = 'unknown'; line = 'Opened from a file, so there is nothing to check against.'; }
+
+  return '<div class="sb-sub">This copy is <strong>' + escapeHtml(APP_VERSION) + '</strong>.</div>'
+    + '<div class="ver-line"><span class="ver-dot ' + dot + '"></span><span>' + line + '</span></div>'
+    + (when ? '<div class="sb-stat" style="margin-top:6px;">Checked ' + when + '.</div>' : '')
+    + (u.status === 'stale'
+        ? '<button class="btn-primary" id="verUpdateBtn" style="margin-top:10px;">Reload onto ' + escapeHtml(u.latest || 'the new version') + '</button>'
+        : '<button class="btn-secondary" id="verCheckBtn" style="margin-top:10px;">Check for updates</button>');
+}
+
 function renderSettingsBody(){
   const el = document.getElementById('settingsBody');
   const stats = wardrobeStats();
@@ -5273,6 +5330,11 @@ function renderSettingsBody(){
     +     '<div class="t-sub">Applies to new photos. You can flip it per photo while reviewing.</div></div>'
     +     '<button class="switch '+(state.cutout?'on':'')+'" id="settingsCutout"></button>'
     +   '</div>'
+    + '</div>'
+
+    + '<div class="settings-block">'
+    +   '<div class="sb-title">Version</div>'
+    +   versionBlock()
     + '</div>'
 
     + '<div class="settings-block">'
@@ -5328,6 +5390,15 @@ function bindSettingsHandlers(){
     cutoutBtn.classList.toggle('on', state.cutout);
     await savePrefs();
   };
+
+  const verCheck = document.getElementById('verCheckBtn');
+  if(verCheck) verCheck.onclick = async function(){
+    this.disabled = true; this.textContent = 'Checking…';
+    await checkForUpdate(true);
+    if(document.getElementById('verCheckBtn')) renderSettingsBody();
+  };
+  const verUpdate = document.getElementById('verUpdateBtn');
+  if(verUpdate) verUpdate.onclick = applyUpdate;
 
   const demoLoad = document.getElementById('demoLoadBtn');
   if(demoLoad) demoLoad.onclick = async function(){
@@ -5684,6 +5755,74 @@ function attachDynamicHandlers(){
 
 document.querySelectorAll('nav.tabs button').forEach(function(b){
   b.onclick = function(){ state.tab = b.dataset.tab; render(); };
+});
+
+/* ---------- am I running the latest version? ----------
+   A service worker means the app you are looking at can be older than the one
+   that is published, and nothing about the screen would tell you. This asks
+   the server what the current version is and compares.
+
+   Deliberately not cached, and deliberately allowed to fail: an app that
+   cannot reach the network says so rather than reassuring you. Being unable
+   to check is a third answer, not a quiet yes. */
+async function checkForUpdate(manual){
+  if(!/^https?:$/.test(location.protocol)){
+    state.update = {status:'local', latest:null, checkedAt:Date.now()};
+    return state.update;
+  }
+  try{
+    const res = await fetch('version.json?t=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) throw new Error('http ' + res.status);
+    const data = await res.json();
+    const latest = data && data.version ? String(data.version) : null;
+    state.update = {
+      status: !latest ? 'unknown' : (latest === APP_VERSION ? 'current' : 'stale'),
+      latest: latest,
+      checkedAt: Date.now()
+    };
+  }catch(e){
+    state.update = {status:'offline', latest:null, checkedAt:Date.now()};
+  }
+  syncUpdateBar();
+  if(manual && document.getElementById('settingsBody')) renderSettingsBody();
+  return state.update;
+}
+
+/* The bar lives outside the view rendering: an update is true whichever tab
+   you happen to be on, and re-rendering a view should not make it flicker. */
+function syncUpdateBar(){
+  const bar = document.getElementById('updateBar');
+  if(!bar) return;
+  const stale = state.update.status === 'stale';
+  bar.hidden = !stale;
+  if(stale){
+    bar.innerHTML = '<span>A newer version is ready — version ' + escapeHtml(state.update.latest) + '.</span>'
+      + '<button id="updateReloadBtn">Reload</button>';
+    const btn = document.getElementById('updateReloadBtn');
+    if(btn) btn.onclick = applyUpdate;
+  }
+}
+
+/* Reload onto the new version. The worker is asked to look for its own update
+   first, or the page could come back through a worker that is still serving
+   the copy we are trying to leave. */
+async function applyUpdate(){
+  toast('Updating…');
+  try{
+    if(navigator.serviceWorker){
+      const reg = await navigator.serviceWorker.getRegistration();
+      if(reg) await reg.update();
+    }
+  }catch(e){}
+  location.reload();
+}
+
+/* Worth re-checking when you come back to the app -- that is exactly when a
+   copy left open overnight has fallen behind -- but not on every glance. */
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  if(Date.now() - (state.update.checkedAt || 0) < 5*60*1000) return;
+  checkForUpdate(false);
 });
 
 /* ---------- rearranging the rail by hand ----------

@@ -15,6 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The app compares its own version against version.json to tell you
+      # whether you are up to date. If those two ever disagree, a current app
+      # reports itself stale forever, or a stale one reports itself current.
+      - name: The three version strings must agree
+        run: |
+          html=$(sed -n "s/^const APP_VERSION = '\(.*\)';$/\1/p" the-rail.html)
+          sw=$(sed -n "s/^const VERSION = '\(.*\)';$/\1/p" sw.js)
+          json=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          echo "the-rail.html: $html"
+          echo "sw.js:         $sw"
+          echo "version.json:  $json"
+          if [ -z "$html" ] || [ "$html" != "$sw" ] || [ "$html" != "$json" ]; then
+            echo "::error::version strings disagree — bump all three together"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

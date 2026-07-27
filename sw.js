@@ -8,7 +8,11 @@
  * copy until the worker happened to update, and "my change didn't show up" is
  * a worse failure than a few hundred milliseconds on a good connection.
  */
-const CACHE = 'the-rail-v1';
+/* The cache is named for the version it holds, so publishing a new one
+   retires the old cache instead of layering on top of it. Keep in step with
+   APP_VERSION in the-rail.html and version.json -- CI checks that they agree. */
+const VERSION = '2026.07.27';
+const CACHE = 'the-rail-' + VERSION;
 const SHELL = ['./', './index.html', './the-rail.html'];
 
 self.addEventListener('install', function(e){
@@ -39,6 +43,15 @@ self.addEventListener('fetch', function(e){
 
   const url = new URL(req.url);
   if(url.origin !== self.location.origin) return;   /* fonts and outbound links: leave alone */
+
+  /* The version check must reach the network or fail honestly. Answering it
+     from the cache would let a stale copy of the app reassure itself that it
+     is current, which is the one thing this file must never do. Not cached
+     either, or every check would leave another entry behind. */
+  if(url.pathname.endsWith('/version.json')){
+    e.respondWith(fetch(req));
+    return;
+  }
 
   e.respondWith(
     fetch(req)
