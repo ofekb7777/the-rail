@@ -65,8 +65,13 @@
     color: var(--bone);
     font-family: 'Work Sans', sans-serif;
     min-height:100vh;
+    min-height:100dvh;
   }
-  #app{max-width:560px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; position:relative;}
+  #app{
+    max-width:560px; margin:0 auto; display:flex; flex-direction:column; position:relative;
+    min-height:100vh;
+    min-height:100dvh;   /* the height you can actually see, address bar and all */
+  }
 
   header.top{
     /* viewport-fit=cover plus a translucent status bar means the page really
@@ -109,8 +114,16 @@
   }
   .tab-ink.ready{opacity:1;}
 
+  /* One scroller: the page. This used to be flex:1 with overflow-y:auto,
+     which is flex-basis 0 -- its height came from the leftover space rather
+     than from its contents, so it became a scrolling box exactly one
+     viewport tall with the rest of the wardrobe inside it. On a phone that
+     is worse than it sounds: 100vh is the height with the address bar
+     hidden, so the box already ran past the bottom of the screen, and the
+     pieces at the end of it could not be reached at all. flex:1 0 auto
+     grows from the content instead, and the document does the scrolling. */
   main{
-    flex:1; overflow-y:auto; overscroll-behavior-y:contain;
+    flex:1 0 auto;
     padding: 18px calc(16px + env(safe-area-inset-left, 0px))
              calc(100px + env(safe-area-inset-bottom, 0px))
              calc(16px + env(safe-area-inset-right, 0px));
@@ -5715,6 +5728,7 @@ function bindReorder(){
 
   const lift = function(){
     lifted = true;
+    measure();
     /* Layout position, not the on-screen rect: offsetLeft ignores transforms,
        so it stays a fixed reference while the card is being moved around by
        one. */
@@ -5724,36 +5738,61 @@ function bindReorder(){
     tick(10);
   };
 
-  const follow = function(x, y){
+  /* Where every other card sits, measured once and refreshed only when the
+     order actually changes. Measuring all of them on every touchmove forced
+     a layout per frame, and reading positions mid-animation meant the
+     nearest card kept changing its mind -- which is what made the grid
+     flicker while a piece was being carried. */
+  let slots = [];
+  const measure = function(){
+    slots = cards().filter(function(el){ return el !== card; }).map(function(el){
+      const r = el.getBoundingClientRect();
+      return {el:el, cx:r.left + r.width/2, cy:r.top + r.height/2, w:r.width, h:r.height};
+    });
+  };
+
+  let pending = null, frame = 0;
+
+  const apply = function(){
+    frame = 0;
+    if(!pending || !lifted) return;
+    const x = pending.x, y = pending.y;
     card.style.transform = 'translate(' + (x - startX) + 'px,' + (y - startY) + 'px) scale(1.06)';
 
-    /* Whose slot is the finger over? Compare against the others' centres and
-       move the carried card there, so the gap is always where it will land. */
-    const others = cards().filter(function(el){ return el !== card; });
+    /* Whose slot is the finger over? Nearest centre wins, but only once the
+       finger is properly inside it -- a card has to be entered, not merely
+       approached, or two neighbours trade places every few pixels. */
     let target = null, best = Infinity;
-    others.forEach(function(el){
-      const r = el.getBoundingClientRect();
-      const d = Math.hypot(x - (r.left + r.width/2), y - (r.top + r.height/2));
-      if(d < best){ best = d; target = el; }
-    });
-    if(!target) return;
-    const tr = target.getBoundingClientRect();
-    if(best > tr.width * 0.75) return;          // not clearly over anything yet
+    for(let i=0; i<slots.length; i++){
+      const s = slots[i];
+      const d = Math.hypot(x - s.cx, y - s.cy);
+      if(d < best){ best = d; target = s; }
+    }
+    if(!target || best > target.w * 0.42) return;
 
     const list = cards();
-    const from = list.indexOf(card), to = list.indexOf(target);
-    if(from === to) return;
+    const from = list.indexOf(card), to = list.indexOf(target.el);
+    if(from === to || to < 0) return;
+
     withFlip(function(){
-      if(from < to) target.after(card);
-      else          target.before(card);
+      if(from < to) target.el.after(card);
+      else          target.el.before(card);
     });
     /* Its slot just moved underneath it. The transform is relative to that
        slot, so the origin has to absorb the shift or the card would jump out
        from under the finger. */
-    const shiftedX = card.offsetLeft - originX, shiftedY = card.offsetTop - originY;
-    startX += shiftedX; startY += shiftedY;
+    startX += card.offsetLeft - originX;
+    startY += card.offsetTop - originY;
     originX = card.offsetLeft; originY = card.offsetTop;
     card.style.transform = 'translate(' + (x - startX) + 'px,' + (y - startY) + 'px) scale(1.06)';
+    measure();
+  };
+
+  /* One update per frame, not one per touch event: a thumb reports far more
+     often than the screen redraws, and the extra work was all jitter. */
+  const follow = function(x, y){
+    pending = {x:x, y:y};
+    if(!frame) frame = requestAnimationFrame(apply);
   };
 
   const drop = async function(){
@@ -5787,6 +5826,9 @@ function bindReorder(){
 
   const cleanup = function(){
     clearTimeout(holdTimer);
+    if(frame){ cancelAnimationFrame(frame); frame = 0; }
+    pending = null; slots = [];
+    window.removeEventListener('scroll', abortHold);
     if(card){
       card.classList.remove('lifted');
       card.style.transform = '';
@@ -5796,13 +5838,23 @@ function bindReorder(){
     card = null; lifted = false;
   };
 
+  /* If the page starts moving during the hold, the gesture was a scroll --
+     whatever the finger did afterwards. Deciding on movement alone was not
+     enough: a thumb can rest almost still for a moment before a slow drag,
+     and picking the card up then is how scrolling starts to feel broken. */
+  function abortHold(){
+    clearTimeout(holdTimer);
+    if(!lifted) card = null;
+  }
+
   grid.addEventListener('touchstart', function(e){
     const c = e.target.closest && e.target.closest('.tag-card');
     if(!c) return;
     card = c;
     startX = e.touches[0].clientX; startY = e.touches[0].clientY;
     lifted = false;
-    holdTimer = setTimeout(lift, 250);
+    window.addEventListener('scroll', abortHold, {passive:true, once:true});
+    holdTimer = setTimeout(lift, 320);
   }, {passive:true});
 
   grid.addEventListener('touchmove', function(e){
