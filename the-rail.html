@@ -612,6 +612,19 @@
   .batch-cut.on{background:var(--sage); color:#101610;}
 
   .upload-hint{font-size:12px; color:rgba(239,232,216,0.5);}
+  .shot-card{
+    border:1px solid rgba(212,165,74,0.28); background:rgba(212,165,74,0.07);
+    border-radius:12px; padding:12px 13px; margin-bottom:14px;
+  }
+  .shot-card-h{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; font-weight:800;
+    color:var(--mustard); margin-bottom:9px;
+  }
+  .shot-row{display:flex; gap:9px; align-items:flex-start; margin-bottom:7px;}
+  .shot-row:last-child{margin-bottom:0;}
+  .shot-row span{flex:none; width:17px; text-align:center; font-size:13px; line-height:1.5;}
+  .shot-row div{font-size:12px; line-height:1.5; color:rgba(239,232,216,0.62);}
+  .shot-row b{color:rgba(239,232,216,0.9); font-weight:600;}
   .shot-tips{
     border-top:1px solid var(--line); padding-top:12px; margin-top:4px;
   }
@@ -877,6 +890,18 @@
 
     <div id="captureStage">
       <div class="add-intro">Photograph your clothes — one at a time, or a whole pile. The app reads the colour straight off the photo and works out the category from the name you give it. No account, no internet, no AI.</div>
+      <!-- Above the buttons and always visible, because the version folded
+           under a summary was read by nobody, and the first photo is the one
+           that decides whether the cut-out ever works. Four lines: any more
+           and it becomes wallpaper. -->
+      <div class="shot-card">
+        <div class="shot-card-h">For a clean cut-out and a true colour</div>
+        <div class="shot-row"><span>🧾</span><div><b>Lay it on one plain surface</b> — paper, a door, a bedsheet. Not held in your hand.</div></div>
+        <div class="shot-row"><span>⬜</span><div><b>Keep the edges clear</b> — only that surface should touch the sides of the photo.</div></div>
+        <div class="shot-row"><span>🌗</span><div><b>Contrast</b> — dark pieces on a light surface, light pieces on a dark one.</div></div>
+        <div class="shot-row"><span>🪟</span><div><b>Daylight, no flash</b>, and fill about half the frame.</div></div>
+      </div>
+
       <div class="capture-row" id="captureRow">
         <label class="capture-btn">
           <input type="file" accept="image/*" capture="environment" id="fileInputCamera">
@@ -899,7 +924,7 @@
            it applies them. Written down because a shoe held up in a room
            fails the first one, and nothing on screen used to say so. -->
       <details class="shot-tips">
-        <summary>How to shoot so the colour and cut-out work</summary>
+        <summary>Why, and what the app does with it</summary>
         <ul>
           <li><b>Put it down on one plain surface.</b> The app measures the very
               edge of the photo to find the background — if a desk, a floor and a
@@ -1014,7 +1039,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.07.31';
+const APP_VERSION = '2026.08.01';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
