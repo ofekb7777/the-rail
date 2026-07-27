@@ -110,6 +110,35 @@ Nothing is fetched to make a suggestion. How cold it is out is a choice you
 make on the Today tab — Cold, Mild or Warm — rather than something the app
 asks a weather service about behind your back.
 
+## Photographing a piece
+
+The colour reader and the background cut-out both work off the same thing: the
+outer edge of the photo. Every rule below is one the code actually applies.
+
+1. **Put the piece down on one plain surface.** The app samples the frame's
+   border to find the backdrop, and refuses to cut when that border is too
+   varied — above a variance of 46. A plain wall measures near 0; a shoe held
+   up in a room, with a desk, a floor and a monitor all touching the edges,
+   measures about 150. Paper, a door or a bedsheet is enough.
+2. **Leave a clear margin.** Nothing but that surface should touch the frame
+   edge — no hands, no table edge, no skirting board.
+3. **Don't hold it.** A hand becomes part of the subject and skin skews the
+   colour.
+4. **Contrast with the surface.** Dark on pale, pale on dark. Black on a
+   near-black rug reads as charcoal; a white shirt on white paper is consumed
+   by the fill and the cut is refused.
+5. **Fill roughly half the frame.** Under about 1% of the frame is treated as
+   clutter; if the fill cannot clear at least 10% of the frame there is no
+   background to remove.
+6. **Even, indirect light.** Pixels brighter than 250 or darker than 26 carry
+   no usable hue and are discarded, so no flash and no hard sun.
+7. **Warm bulbs are corrected up to a point.** The illuminant estimate is only
+   trusted within a band; beyond it the correction is refused rather than
+   half-applied, and colours read warm. A window beats a lamp.
+8. **One piece per photo**, straight on, whole thing in frame.
+
+The same list is in the app, under *Add piece*.
+
 ## How the suggestions work
 
 There is no language model here. Outfits are scored on five axes:
