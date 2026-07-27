@@ -129,6 +129,12 @@
     transition:transform var(--press);
   }
   .update-bar button:active{transform:scale(0.95);}
+  .diag{
+    font-family:ui-monospace, Menlo, Consolas, monospace; font-size:10.5px; line-height:1.5;
+    white-space:pre-wrap; word-break:break-word; margin:8px 0 10px; padding:10px;
+    background:rgba(0,0,0,0.28); border:1px solid var(--line); border-radius:8px;
+    color:rgba(239,232,216,0.72);
+  }
   .ver-line{display:flex; align-items:center; gap:7px; font-size:12.5px; margin-top:2px;}
   .ver-dot{width:8px; height:8px; border-radius:50%; flex:none;}
   .ver-dot.ok{background:var(--sage);}
@@ -962,7 +968,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.07.27';
+const APP_VERSION = '2026.07.28';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -5304,6 +5310,76 @@ function versionBlock(){
         : '<button class="btn-secondary" id="verCheckBtn" style="margin-top:10px;">Check for updates</button>');
 }
 
+/* ---------- what this device is actually doing ----------
+   Scrolling is reported broken on a phone and cannot be reproduced in a
+   desktop browser at phone size, which means the difference is the device,
+   not the layout as I can see it. Rather than guess a third time, the app
+   measures itself and says so out loud.
+
+   The decisive line is the last one: if the page can be scrolled by script
+   but not by a finger, the problem is something eating the gesture. If it
+   cannot be scrolled by script either, the page genuinely has nowhere to go
+   and the problem is the layout. */
+function scrollDiagnostics(){
+  const de = document.scrollingElement || document.documentElement;
+  const app = document.getElementById('app');
+  const main = document.querySelector('main');
+  const cs = function(el, prop){ return el ? getComputedStyle(el)[prop] : '-'; };
+
+  /* Try to move the page from script, then put it back. */
+  const was = de.scrollTop;
+  de.scrollTop = 150;
+  const moved = de.scrollTop;
+  de.scrollTop = was;
+
+  const vv = window.visualViewport;
+  return {
+    mode: window.matchMedia('(display-mode: standalone)').matches ? 'installed app'
+        : (window.matchMedia('(display-mode: fullscreen)').matches ? 'fullscreen' : 'browser tab'),
+    window: Math.round(window.innerHeight),
+    visual: vv ? Math.round(vv.height) : null,
+    page: Math.round(de.scrollHeight),
+    room: Math.round(de.scrollHeight - de.clientHeight),
+    appH: app ? Math.round(app.getBoundingClientRect().height) : null,
+    mainH: main ? Math.round(main.getBoundingClientRect().height) : null,
+    overflow: [cs(document.documentElement,'overflow'), cs(document.body,'overflow'),
+               cs(app,'overflow'), cs(main,'overflowY')].join(' / '),
+    mainFlex: cs(main, 'flex'),
+    bodyPos: cs(document.body, 'position'),
+    touchAction: cs(document.body, 'touchAction'),
+    byScript: moved,
+    items: state.items.length,
+    dpr: window.devicePixelRatio
+  };
+}
+
+function diagnosticsText(){
+  const d = scrollDiagnostics();
+  return 'THE RAIL ' + APP_VERSION + '\n'
+    + 'mode: ' + d.mode + '\n'
+    + 'window/visual height: ' + d.window + ' / ' + (d.visual === null ? '-' : d.visual) + '\n'
+    + 'page height: ' + d.page + '  (#app ' + d.appH + ', main ' + d.mainH + ')\n'
+    + 'room to scroll: ' + d.room + 'px\n'
+    + 'overflow html/body/#app/main: ' + d.overflow + '\n'
+    + 'main flex: ' + d.mainFlex + '\n'
+    + 'body position / touch-action: ' + d.bodyPos + ' / ' + d.touchAction + '\n'
+    + 'scrolled by script: ' + d.byScript + 'px (asked for 150)\n'
+    + 'pieces: ' + d.items + ', dpr: ' + d.dpr + '\n'
+    + 'ua: ' + navigator.userAgent;
+}
+
+function diagnosticsBlock(){
+  const d = scrollDiagnostics();
+  const verdict = d.room <= 4
+    ? 'This page has nowhere to scroll to — everything fits.'
+    : (d.byScript > 100
+        ? 'The page CAN scroll ' + d.room + 'px, and script moved it. If your finger cannot, something is eating the gesture.'
+        : 'The page reports ' + d.room + 'px to scroll but would not move even from script. That is a layout fault.');
+  return '<div class="sb-sub">' + escapeHtml(verdict) + '</div>'
+    + '<pre class="diag">' + escapeHtml(diagnosticsText()) + '</pre>'
+    + '<button class="btn-secondary" id="diagCopyBtn">Copy this</button>';
+}
+
 function renderSettingsBody(){
   const el = document.getElementById('settingsBody');
   const stats = wardrobeStats();
@@ -5330,6 +5406,11 @@ function renderSettingsBody(){
     +     '<div class="t-sub">Applies to new photos. You can flip it per photo while reviewing.</div></div>'
     +     '<button class="switch '+(state.cutout?'on':'')+'" id="settingsCutout"></button>'
     +   '</div>'
+    + '</div>'
+
+    + '<div class="settings-block">'
+    +   '<div class="sb-title">Scrolling diagnostics</div>'
+    +   diagnosticsBlock()
     + '</div>'
 
     + '<div class="settings-block">'
@@ -5389,6 +5470,24 @@ function bindSettingsHandlers(){
     state.cutout = !state.cutout;
     cutoutBtn.classList.toggle('on', state.cutout);
     await savePrefs();
+  };
+
+  const diagCopy = document.getElementById('diagCopyBtn');
+  if(diagCopy) diagCopy.onclick = async function(){
+    const txt = diagnosticsText();
+    try{
+      await navigator.clipboard.writeText(txt);
+      toast('Diagnostics copied');
+    }catch(e){
+      /* Clipboard access is refused in plenty of places; selecting the text
+         is something you can always do something with. */
+      const pre = document.querySelector('.diag');
+      if(pre){
+        const r = document.createRange(); r.selectNodeContents(pre);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        toast('Selected — long-press to copy');
+      }
+    }
   };
 
   const verCheck = document.getElementById('verCheckBtn');
