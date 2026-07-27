@@ -128,6 +128,31 @@ overcoat" is understood as formal, warm, and outerwear without you tagging it.
 **What am I missing?** counts how many workable outfits your wardrobe can
 already produce, then works out which single unowned piece would add the most.
 
+## Versions
+
+The app knows which version it is and can tell you whether it is the current
+one. `Settings → Version` shows the copy you are running and one of four
+answers: up to date, a newer version is available, could not reach the server,
+or opened from a file so there is nothing to check against. When a newer one
+exists a bar appears under the tabs with a **Reload** button, since a cached
+copy of a web app can otherwise sit a version behind indefinitely without ever
+saying so.
+
+The version string lives in three places and they must match:
+
+| Where | What it is |
+|---|---|
+| `APP_VERSION` in `the-rail.html` | what this copy believes it is |
+| `version.json` | what the site says is published |
+| `VERSION` in `sw.js` | names the cache, so publishing retires the old one |
+
+**Bump all three in the same commit.** The smoke workflow compares them and
+fails the build if they drift — if they did, a current app would report itself
+stale forever, or worse, a stale one would report itself current.
+
+`version.json` is deliberately never cached by the service worker: a stale copy
+of the app must not be able to reassure itself from its own cache.
+
 ## Storage
 
 IndexedDB, with a localStorage fallback if it is unavailable. Photos are
