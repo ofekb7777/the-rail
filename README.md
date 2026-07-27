@@ -153,6 +153,21 @@ stale forever, or worse, a stale one would report itself current.
 `version.json` is deliberately never cached by the service worker: a stale copy
 of the app must not be able to reassure itself from its own cache.
 
+## Diagnostics
+
+`Settings → Diagnostics → Run diagnostics` gathers what the app can see about
+the device it is on — version and update status, how it was opened, service
+worker state, storage backend and usage, viewport and page heights, the
+overflow of every element in the layout chain, and the user agent — as text
+with a copy button.
+
+It exists because a scrolling fault was reported that could not be reproduced
+on any desktop browser, and turned out to be a phone still running a copy of
+the app from before the fix. The one measurement worth understanding is the
+scroll probe: it moves the page from script and reports how far it got, which
+separates *a page that cannot scroll* from *a page that can but will not for a
+finger*. Those are entirely different faults.
+
 ## Storage
 
 IndexedDB, with a localStorage fallback if it is unavailable. Photos are
