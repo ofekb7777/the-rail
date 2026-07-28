@@ -203,31 +203,53 @@ below.
 
 ## Looking at a look
 
-Every outfit can be shown two ways, and the toggle above it remembers which
-you prefer.
+Outfits are shown laid out — the garments arranged the way you would lay them
+on a bed. Outer and top share the top row, legs beneath, shoes beneath those,
+and the smaller things are set off below a rule, because a bag does not go
+under the boots.
 
-**Pieces** is the grid: equal tiles, captioned, one per garment. It answers
-*which things are in this?*
+This replaced a grid of equal captioned tiles. The grid answered *which things
+are in this?*; it could not answer *does this go together?*, which is a
+judgement about proportion and about where the colours sit relative to each
+other. Sizes are therefore set per category rather than per photo — a shoe
+photographed close up and a coat photographed from further back arrive at the
+same pixel dimensions, and drawing them the same size is exactly what makes a
+collage look wrong. Pieces stay tappable: anything with ⇄ has alternatives.
 
-**Laid out** arranges the same garments the way you would lay them on a bed —
-outer and top sharing the top row, legs beneath, shoes beneath those, and the
-smaller things set off below a rule. It answers the question the grid cannot,
-which is *do these go together?*, because that is a judgement about proportion
-and about where the colours sit relative to each other. Sizes are set per
-category rather than per photo, since a shoe photographed close up and a coat
-photographed from further back arrive at the same pixel dimensions, and drawing
-them the same size is what makes a collage look wrong.
+### Why the backgrounds disappear
 
-Pieces stay swappable in both views — anything with ⇄ has alternatives.
+A lay-out only reads as one if the garments are separated from whatever they
+were photographed on. Two things make that happen.
 
-The images are composited with `mix-blend-mode: multiply`, which is what makes
-this a lay-out rather than a collage. The cut-out paints the background *white*
-and photos are stored as JPEG, which has no transparency, so every photo — cut
-or not — arrives as a white rectangle. Multiplied against the paper, white
-becomes the paper and the garment stays itself: the same result a transparent
-PNG would give, without changing how anything is stored. The honest cost is
-that a photo you never cut darkens its own background rather than hiding it,
-which is a fair way of showing that the piece has not been cut.
+**The stored photo.** The cut-out at import paints the background white. If you
+skipped it, or it declined, *Cut out the background* on the piece's own detail
+sheet does it after the fact — and offers to put it back, since the photo it
+edits is the only copy you have. When the cut declines because the background
+is too cluttered, the button offers to overrule it, exactly as the import does.
+
+**The knockout at display time.** White on paper is still a white rectangle, so
+the lay-out builds a copy of each photo with real transparency. The rule is not
+*"white pixels go"* — that hollows out a white shirt. It is the same rule the
+cut-out uses: flood inward from the border and take only the pale pixels
+actually **connected to the edge**. A white shirt's middle is not connected to
+the border, because the shirt is in the way, so it survives; a photo that was
+never cut has a room at its border rather than white, so nothing is taken and it
+is shown exactly as it is. The threshold sits at 246 rather than 228 for that
+reason — at 228 it ate the middle out of a white shirt, and losing a garment is
+much worse than leaving an edge on a photo you never cut. If the fill ends up
+taking almost the whole frame it is refused outright, on the grounds that it has
+clearly eaten the garment too.
+
+Blending the photo with `mix-blend-mode: multiply` was tried first and is not
+enough: photos are stored as JPEG, JPEG keeps no pure white, and the near-white
+that comes back multiplies into a faint rectangle around every piece.
+
+The copy is cached for the session and never written to storage — it is a way of
+*showing* the photo, not an edit to it.
+
+A piece photographed against a genuinely busy background cannot be isolated by
+any of this, and will still read as a rectangle. The fix for that one is the
+camera: see **Photographing a piece** above.
 
 ## The back gesture
 

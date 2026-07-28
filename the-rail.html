@@ -435,46 +435,25 @@
 
   .deck-hint{text-align:center; font-size:11px; color:rgba(239,232,216,0.35); margin-top:7px; letter-spacing:0.5px;}
 
-  /* ---- lookbook ---- */
-  .lookbook{display:grid; grid-template-columns:repeat(2,1fr); gap:7px; margin:14px 0 4px;}
-  .lb-item{
-    position:relative; border-radius:9px; overflow:hidden; background:#fff;
-    aspect-ratio:1/1; box-shadow:0 4px 12px -4px rgba(0,0,0,0.3);
-  }
-  .lb-item.hero{grid-column:span 2; aspect-ratio:16/11;}
-  .lb-item img{width:100%; height:100%; object-fit:cover; display:block;}
-  .lb-cap{
-    position:absolute; left:0; right:0; bottom:0; padding:16px 8px 6px;
-    background:linear-gradient(transparent, rgba(0,0,0,0.78));
-    color:#fff; font-size:10.5px; font-weight:600; line-height:1.25;
-  }
-  .lb-cap .lb-cat{display:block; font-size:8.5px; opacity:0.7; text-transform:uppercase; letter-spacing:0.5px; font-weight:700;}
-  .lb-badge{
-    position:absolute; top:7px; left:7px; background:var(--mustard); color:#2a2010;
-    font-size:8.5px; font-weight:800; padding:3px 7px; border-radius:10px;
-    text-transform:uppercase; letter-spacing:0.5px;
-  }
   /* ---------- the look, laid out ---------- */
-  .lay-toggle{
-    display:flex; gap:0; margin:0 0 10px; background:rgba(27,33,48,0.07);
-    border-radius:8px; padding:2px; width:fit-content;
-  }
-  .lay-btn{
-    border:none; background:transparent; font-family:'Work Sans'; font-size:10.5px;
-    font-weight:700; letter-spacing:0.3px; padding:5px 11px; border-radius:6px;
-    color:rgba(27,33,48,0.5); cursor:pointer; transition:background var(--press), color var(--press);
-  }
-  .lay-btn.on{background:var(--bone); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,0.13);}
   /* A flat lay is mostly the space around the clothes -- crowd them and it
-     stops reading as a lay-out and goes back to being a collage. */
+     stops reading as a lay-out and goes back to being a collage.
+
+     The backdrop is one flat colour on purpose. A gradient survives the
+     multiply below unchanged, so a cut-out photo's white edge lands on a
+     slightly different shade than the pixel beside it and the rectangle
+     reappears as a faint seam. Flat colour has no seam to show. */
   .flatlay{
-    background:linear-gradient(160deg, #e6e1d6, #d8d2c4);
-    border-radius:12px; padding:16px 12px 20px;
-    display:flex; flex-direction:column; align-items:center; gap:2px;
+    background:#d3ccbe;
+    border-radius:12px; padding:26px 14px 30px;
+    display:flex; flex-direction:column; align-items:center; gap:0;
   }
+  /* Pieces on the same row touch, the way they would if you laid a jacket
+     next to the shirt it opens over. A gap between them reads as two
+     photographs; no gap reads as one arrangement. */
   .fl-row{
     display:flex; justify-content:center; align-items:flex-end;
-    gap:4px; width:100%;
+    gap:0; width:100%;
   }
   /* Garment photos are square but garments are not, so every tile carries
      empty margin above and below. Left alone that margin stacks and the rows
@@ -492,24 +471,25 @@
   /* contain, never cover: cropping a garment to fill a box is precisely the
      thing this view exists to avoid.
 
-     multiply is what makes this a lay-out rather than a collage. The cut-out
-     paints the background *white* and stores JPEG, which has no transparency
-     -- so every photo, cut or not, arrives as a white rectangle. Multiplied
-     against the paper, white becomes the paper and the garment stays itself,
-     which is the same result a transparent PNG would give without changing
-     how anything is stored. The cost is that an uncut photo darkens its own
-     background instead of hiding it, which is a fair way to show that the
-     piece has not been cut. */
+     The background is knocked out to real transparency in script rather than
+     blended away in CSS -- see knockOutWhite. multiply was tried first and
+     leaves a faint rectangle around every piece, because the stored photo is
+     JPEG and JPEG has no pure white to blend into the paper. */
   .fl-item img{
     width:100%; height:auto; display:block; object-fit:contain;
-    mix-blend-mode:multiply;
   }
+  /* The reference this is modelled on puts nothing at all on the garments,
+     and every badge added here is a thing that is not clothing. So it is as
+     quiet as it can be while still being findable -- the tip under the
+     lay-out is what actually tells you the pieces are tappable. */
   .fl-swap{
-    position:absolute; right:-2px; bottom:-2px; background:var(--ink); color:var(--bone);
-    font-size:9px; font-weight:800; width:17px; height:17px; border-radius:50%;
+    position:absolute; right:4px; bottom:4px;
+    background:rgba(27,33,48,0.28); color:#fff;
+    font-size:8px; font-weight:700; width:14px; height:14px; border-radius:50%;
     display:flex; align-items:center; justify-content:center;
-    box-shadow:0 2px 5px rgba(0,0,0,0.3);
+    opacity:0.55; transition:opacity var(--press), background var(--press);
   }
+  .fl-item:active .fl-swap{opacity:1; background:var(--ink);}
   .lb-swatches{display:flex; gap:4px; align-items:center; margin:10px 0 2px;}
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
@@ -584,14 +564,7 @@
   .bp-text.warn{color:var(--mustard);}
 
   .swap-tip{font-size:11px; color:#6b6455; margin:10px 0 2px; letter-spacing:0.2px;}
-  .lb-item[data-swap]{cursor:pointer;}
   .fl-item[data-swap]{cursor:pointer;}
-  .lb-swap{
-    position:absolute; top:7px; right:7px; z-index:3;
-    background:rgba(27,33,48,0.82); color:var(--bone);
-    font-size:10px; font-weight:700; letter-spacing:0.3px;
-    padding:3px 7px; border-radius:11px; backdrop-filter:blur(3px);
-  }
   .swap-head{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px;}
   .swap-label{font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--sage); font-weight:700;}
   .swap-hint{font-size:12px; color:rgba(239,232,216,0.5); margin:12px 0 10px;}
@@ -1101,7 +1074,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.09';
+const APP_VERSION = '2026.08.10';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1425,7 +1398,6 @@ let state = {
   showGaps: false,
   gapResult: null,
   cutout: true,
-  flatLay: false,   /* show looks laid out as they would be worn, not as a grid */
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1523,7 +1495,6 @@ async function loadAll(){
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
-  if(typeof prefs.flatLay === 'boolean') state.flatLay = prefs.flatLay;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1552,8 +1523,7 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen,
-    flatLay: state.flatLay
+    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen
   });
 }
 
@@ -3525,6 +3495,9 @@ function render(){
   lastRenderedTab = state.tab;
   moveTabInk(tabChanged);
   attachDynamicHandlers();
+  /* Deliberately not awaited: the lay-out is on screen with the ordinary
+     photos already, and this only swaps in the cut-out copies as they come. */
+  enhanceLayImages();
 }
 
 function greeting(){
@@ -3747,10 +3720,10 @@ function normalizeResult(r){
    fit on one screen or it is not showing you how it goes together, it is
    showing you a piece at a time -- which the grid already does. */
 const LAY_ROWS = [
-  {cats:['headwear'],            w:'20%'},
+  {cats:['headwear'],            w:'24%'},
   {cats:['outerwear','top','dress'], w:null},   /* per-item, set below */
-  {cats:['bottom'],              w:'40%'},
-  {cats:['footwear'],            w:'25%'},
+  {cats:['bottom'],              w:'48%'},
+  {cats:['footwear'],            w:'30%'},
   /* The small things are set apart rather than stacked into the body, because
      they are not worn in that order -- a bag does not go below the shoes. The
      rows above overlap to close the empty margin inside each photo; this one
@@ -3761,9 +3734,9 @@ const LAY_ROWS = [
    because it is alone, and a dress reads as a whole outfit rather than a
    half of one. */
 function layWidth(cat, shared){
-  if(cat === 'dress') return shared ? '34%' : '40%';
-  if(cat === 'outerwear' || cat === 'top') return shared ? '37%' : '42%';
-  return '37%';
+  if(cat === 'dress') return shared ? '40%' : '48%';
+  if(cat === 'outerwear' || cat === 'top') return shared ? '44%' : '52%';
+  return '44%';
 }
 
 function renderFlatLay(outfit, allowSwap){
@@ -3781,7 +3754,7 @@ function renderFlatLay(outfit, allowSwap){
       const alts = allowSwap ? swapCandidates(it, outfit.itemIds).length : 0;
       const w = row.w || layWidth(it.category, shared);
       return '<div class="fl-item" style="width:'+w+'"'+(alts?' data-swap="'+it.id+'"':'')+'>'
-        + '<img src="'+imgSrc(it)+'" loading="lazy" alt="'+escapeHtml(it.name)+'">'
+        + '<img src="'+imgSrc(it)+'" data-lay-img="'+it.id+'" alt="'+escapeHtml(it.name)+'">'
         + (alts ? '<span class="fl-swap">⇄</span>' : '')
         + '</div>';
     }).join('');
@@ -3800,37 +3773,6 @@ function renderFlatLay(outfit, allowSwap){
   return '<div class="flatlay">'+rows+'</div>'+swatches;
 }
 
-function renderLookbook(outfit, allowSwap){
-  const items = outfit.itemIds
-    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
-    .filter(Boolean)
-    .sort(function(a,b){ return (CAT_ORDER[a.category]||9)-(CAT_ORDER[b.category]||9); });
-  if(items.length===0) return '';
-
-  let heroIdx = 0;
-  if(state.anchorId){
-    const ai = items.findIndex(function(i){ return i.id===state.anchorId; });
-    if(ai>-1) heroIdx = ai;
-  }
-
-  const cells = items.map(function(it, idx){
-    const isHero = idx===heroIdx;
-    const alts = allowSwap ? swapCandidates(it, outfit.itemIds).length : 0;
-    return '<div class="lb-item '+(isHero?'hero':'')+'"'+(alts?' data-swap="'+it.id+'"':'')+'>'
-      + '<img src="'+imgSrc(it)+'" loading="lazy" alt="">'
-      + (isHero && state.anchorId===it.id ? '<div class="lb-badge">Your pick</div>' : '')
-      + (alts ? '<div class="lb-swap">⇄ '+alts+'</div>' : '')
-      + '<div class="lb-cap"><span class="lb-cat">'+it.category+'</span>'+escapeHtml(it.name)+'</div>'
-      + '</div>';
-  }).join('');
-
-  const cols = uniq(items.map(function(i){ return i.color; }));
-  const swatches = '<div class="lb-swatches">'+cols.map(function(n){
-    return '<span class="sw-bar" style="background:'+colorByName(n).hex+'"></span>';
-  }).join('')+'</div>';
-
-  return '<div class="lookbook">'+cells+'</div>'+swatches;
-}
 
 /* A small wheel showing where this outfit's colours actually sit, and the
    shape they make. The app already decides the rule -- complementary,
@@ -3877,11 +3819,7 @@ function renderOutfitResult(outfit, saved, savedIdx){
   return '<div class="outfit-result">'
     + '<div class="stamp">'+stamp+'</div>'
     + '<h4>'+escapeHtml(outfit.title||'Your outfit')+'</h4>'
-    + '<div class="lay-toggle">'
-    +   '<button class="lay-btn'+(state.flatLay?'':' on')+'" data-lay="grid">Pieces</button>'
-    +   '<button class="lay-btn'+(state.flatLay?' on':'')+'" data-lay="lay">Laid out</button>'
-    + '</div>'
-    + (state.flatLay ? renderFlatLay(outfit, !saved) : renderLookbook(outfit, !saved))
+    + renderFlatLay(outfit, !saved)
     + (!saved ? '<div class="swap-tip">Tap any piece with ⇄ to try a different one</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
@@ -4677,6 +4615,12 @@ function openDetail(id){
     + '</div>'
     + harmonyHtml
     + '<button class="btn-primary" id="buildAroundBtn">Build an outfit around this</button>'
+    /* Offered on every piece rather than only on ones that look uncut: the
+       app does not record whether a stored photo was cut, so deciding which
+       pieces "need" this would be a guess. Undo makes offering it safe. */
+    + (item.imageOriginal
+        ? '<button class="btn-secondary" id="undoCutBtn">Put the background back</button>'
+        : '<button class="btn-secondary" id="cutItemBtn">Cut out the background</button>')
     + '<button class="btn-secondary" id="woreItemBtn">I\'m wearing this today</button>'
     + '<button class="btn-secondary" id="editItemBtn">Edit details</button>'
     + '<div id="editPanel" style="display:none; margin-top:12px;">'
@@ -4724,6 +4668,39 @@ function openDetail(id){
     state.lastResult = null;
     detailOverlay.classList.remove('open');
     render();
+  };
+
+  const cutBtn = document.getElementById('cutItemBtn');
+  if(cutBtn) cutBtn.onclick = async function(){
+    const btn = this;
+    btn.disabled = true; btn.textContent = 'Cutting…';
+    let res;
+    try{ res = await recutItem(item, false); }
+    catch(e){ console.error('recut failed', e); res = {ok:false, reason:'error'}; }
+
+    if(res.ok){ openDetail(id); render(); toast('Background removed'); return; }
+
+    /* A refusal is a judgement, and the same judgement can be overruled here
+       as at import -- so say why it declined and offer the override rather
+       than leaving a dead button. */
+    btn.disabled = false;
+    btn.textContent = 'Cut it out anyway';
+    toast(cutReasonText(res.reason));
+    btn.onclick = async function(){
+      btn.disabled = true; btn.textContent = 'Cutting…';
+      let forced;
+      try{ forced = await recutItem(item, true); }
+      catch(e){ console.error('forced recut failed', e); forced = {ok:false, reason:'error'}; }
+      if(forced.ok){ openDetail(id); render(); toast('Background removed'); }
+      else{ btn.disabled = false; btn.textContent = 'Cut out the background'; toast('Could not cut this photo'); }
+    };
+  };
+
+  const undoCut = document.getElementById('undoCutBtn');
+  if(undoCut) undoCut.onclick = async function(){
+    this.disabled = true;
+    if(await undoRecut(item)){ openDetail(id); render(); toast('Background restored'); }
+    else this.disabled = false;
   };
   document.getElementById('woreItemBtn').onclick = function(){
     logWear([id], item.name);
@@ -4915,6 +4892,174 @@ function renderBatchQueue(){
    work. A photo of a shoe held up in a room has a border variance around
    three times the limit, so for hand-held shots indoors this is the normal
    outcome, not the rare one. */
+/* ---------- knocking the white out for the lay-out ----------
+   Multiplying the photo against the paper very nearly works, and "very
+   nearly" is what a faint rectangle around every garment looks like. The
+   cut-out paints pure white, but the photo is then stored as JPEG, and JPEG
+   does not keep pure anything -- compression rings around a hard edge, so
+   the white comes back as 250s and 246s that multiply into a visible box.
+
+   So the lay-out gets a copy with real transparency instead. The rule is not
+   "white pixels go", which would hollow out a white shirt: it is the same
+   rule the cut-out uses, flood fill inward from the border and take only the
+   pale pixels actually connected to the edge. A white shirt's middle is not
+   connected to the border -- the shirt is in the way -- so it survives, and
+   a photo that was never cut has a room at its border rather than white, so
+   nothing is taken and it stays exactly as it was.
+
+   This runs once per piece and is cached for the session. It is deliberately
+   not written back to storage: it is a way of *showing* the photo, not an
+   edit to it. */
+const _layCache = new Map();
+
+function knockOutWhite(canvas){
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+
+  /* Tight on purpose. The backdrop this is looking for was *painted* pure
+     white by the cut-out, and only JPEG ringing moves it off 255 -- whereas a
+     white garment is lit, folded and shaded, and sits in the 230s. A looser
+     rule was tried at 228 and ate the middle out of a white shirt, which is
+     the one failure worth designing against here: losing a garment is much
+     worse than leaving a faint edge on a photo that was never cut. */
+  const pale = function(idx){
+    const p = idx*4;
+    const r = d[p], g = d[p+1], b = d[p+2];
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    return mx >= 246 && (mx-mn) <= 12;
+  };
+
+  const seen = new Uint8Array(w*h);
+  const stack = [];
+  for(let x=0;x<w;x++){ stack.push(x); stack.push((h-1)*w+x); }
+  for(let y=0;y<h;y++){ stack.push(y*w); stack.push(y*w + w-1); }
+  let cleared = 0;
+  while(stack.length){
+    const idx = stack.pop();
+    if(idx < 0 || idx >= w*h || seen[idx]) continue;
+    if(!pale(idx)) continue;
+    seen[idx] = 1; cleared++;
+    const x = idx % w, y = (idx - x)/w;
+    if(x>0)   stack.push(idx-1);
+    if(x<w-1) stack.push(idx+1);
+    if(y>0)   stack.push(idx-w);
+    if(y<h-1) stack.push(idx+w);
+  }
+  /* Nothing pale reaches the border: this photo still has its background, and
+     pretending otherwise would only punch holes in it. At the other end, a
+     fill that has taken almost the whole frame has eaten the garment along
+     with the paper -- a pale piece on a paler sweep -- and showing nothing at
+     all is worse than showing the photo as it is. */
+  if(cleared < w*h*0.04 || cleared > w*h*0.93) return false;
+
+  /* Where the garment meets the white, the photo has a ramp of part-garment
+     part-paper pixels. They sit below the threshold, so the fill stops short
+     and leaves them behind as a white halo tracing every piece. One pass
+     outward over the ramp takes it: only pixels already touching cleared
+     background, and only ones still pale enough to be mostly paper. */
+  const halo = new Uint8Array(w*h);
+  for(let idx=0; idx<w*h; idx++){
+    if(seen[idx]) continue;
+    const x = idx % w, y = (idx - x)/w;
+    const touches = (x>0 && seen[idx-1]) || (x<w-1 && seen[idx+1])
+                 || (y>0 && seen[idx-w]) || (y<h-1 && seen[idx+w]);
+    if(!touches) continue;
+    const p = idx*4;
+    const mx = Math.max(d[p],d[p+1],d[p+2]), mn = Math.min(d[p],d[p+1],d[p+2]);
+    if(mx >= 234 && (mx-mn) <= 16) halo[idx] = 1;
+  }
+  for(let idx=0; idx<w*h; idx++) if(halo[idx]) seen[idx] = 1;
+
+  for(let idx=0; idx<w*h; idx++){
+    if(!seen[idx]) continue;
+    const x = idx % w, y = (idx - x)/w;
+    /* Half-clear the boundary ring instead of cutting it square, or every
+       garment gets a hard aliased outline against the paper. */
+    let edge = false;
+    if(x>0   && !seen[idx-1]) edge = true;
+    if(x<w-1 && !seen[idx+1]) edge = true;
+    if(y>0   && !seen[idx-w]) edge = true;
+    if(y<h-1 && !seen[idx+w]) edge = true;
+    d[idx*4+3] = edge ? 90 : 0;
+  }
+  ctx.putImageData(img,0,0);
+  return true;
+}
+
+/* Swaps in the transparent copy once it is ready. Synchronous render puts the
+   ordinary photo up first, so the lay-out is never blank while this runs. */
+async function enhanceLayImages(){
+  const nodes = document.querySelectorAll('img[data-lay-img]');
+  for(let n=0; n<nodes.length; n++){
+    const el = nodes[n];
+    const id = el.getAttribute('data-lay-img');
+    if(_layCache.has(id)){
+      const url = _layCache.get(id);
+      if(url) el.src = url;
+      continue;
+    }
+    const item = state.items.find(function(i){ return i.id===id; });
+    if(!item || !item.image){ _layCache.set(id, null); continue; }
+    try{
+      const img = await loadImageFromDataUrl(item.image);
+      const c = drawToCanvas(img, 420);
+      const url = knockOutWhite(c) ? c.toDataURL('image/png') : null;
+      _layCache.set(id, url);
+      if(url && el.isConnected) el.src = url;
+    }catch(e){
+      _layCache.set(id, null);
+    }
+  }
+}
+
+/* ---------- cutting a piece you already added ----------
+   The lay-out only reads as a lay-out if the garments are separated from
+   whatever they were photographed on, and until now the only chance to do
+   that was the moment the photo was imported. A piece added with the cut-out
+   switched off, or one the cut declined at the time, was a rectangle of
+   somebody's floor for good.
+
+   The photo as stored is the only copy, so the original is kept alongside
+   before anything is painted over it -- one undo is worth the bytes, and
+   without it "cut" would be a one-way door on the only picture you have. */
+async function recutItem(item, force){
+  if(!item || !item.image) return {ok:false, reason:'error'};
+  const img = await loadImageFromDataUrl(item.image);
+  const work = drawToCanvas(img, 520);
+  const cut = cutOutBackground(work, {force:!!force});
+  if(!cut.applied) return {ok:false, reason:cut.reason || 'error'};
+  if(!item.imageOriginal) item.imageOriginal = item.image;
+  item.image = canvasToJpeg(work, 0.76);
+  _urlCache.delete(item.id);
+  _layCache.delete(item.id);   /* the lay-out copy is derived from the photo */
+  await saveItems();
+  return {ok:true};
+}
+
+async function undoRecut(item){
+  if(!item || !item.imageOriginal) return false;
+  item.image = item.imageOriginal;
+  delete item.imageOriginal;
+  _urlCache.delete(item.id);
+  _layCache.delete(item.id);   /* the lay-out copy is derived from the photo */
+  await saveItems();
+  return true;
+}
+
+function loadImageFromDataUrl(url){
+  return new Promise(function(resolve, reject){
+    const img = new Image();
+    img.onload = function(){
+      if(!img.naturalWidth) { reject(new Error('image has no dimensions')); return; }
+      resolve(img);
+    };
+    img.onerror = function(){ reject(new Error('could not decode the stored photo')); };
+    img.src = url;
+  });
+}
+
 function cutReasonText(reason){
   if(reason === 'busy background') return 'background kept — too cluttered to cut cleanly';
   if(reason === 'no subject found') return 'background kept — could not find the piece';
@@ -5541,9 +5686,12 @@ function drawDemoGarment(shape, hex, opt){
   const c = document.createElement('canvas');
   c.width = S; c.height = S;
   const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0,0,0,S);
-  g.addColorStop(0,'#ffffff'); g.addColorStop(0.7,'#f4f2ee'); g.addColorStop(1,'#e8e4dc');
-  ctx.fillStyle=g; ctx.fillRect(0,0,S,S);
+  /* Flat white, not a gradient. These stand in for photographs you have cut
+     the background out of, and the cut-out paints pure white -- a gradient
+     made them stand in for something the app never produces, and the lay-out
+     showed it, leaving a pale rectangle under every demo piece where the
+     gradient had fallen below the knockout's threshold. */
+  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,S,S);
   ctx.save();
   ctx.globalAlpha=0.22; ctx.filter='blur(9px)'; ctx.fillStyle='#000';
   ctx.beginPath(); ctx.ellipse(S/2+S*0.03, S*0.86, S*0.29, S*0.042, 0,0,7); ctx.fill();
@@ -6100,17 +6248,6 @@ function attachDynamicHandlers(){
     el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
   });
 
-  /* The choice is about how you want to look at outfits, not about this one
-     outfit, so it is remembered and every card follows it. */
-  document.querySelectorAll('[data-lay]').forEach(function(el){
-    el.onclick = function(){
-      const want = el.dataset.lay === 'lay';
-      if(want === state.flatLay) return;
-      state.flatLay = want;
-      savePrefs();
-      render();
-    };
-  });
 
   on('toggleGaps', function(){
     state.showGaps = !state.showGaps;
