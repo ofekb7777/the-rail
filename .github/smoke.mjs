@@ -167,7 +167,6 @@ try {
     await loadDemoWardrobe();
     const pick = (c) => state.items.find((i) => i.category === c);
     const ids = ['outerwear', 'top', 'bottom', 'footwear'].map(pick).filter(Boolean).map((i) => i.id);
-    state.flatLay = true;
     state.lastResult = { outfits: [{ itemIds: ids, title: 'T', percent: 80, pills: [] }] };
     state.activeOption = 0;
     state.tab = 'today';
@@ -189,10 +188,39 @@ try {
       }
     }
     if (!rows.some((r) => r.length === 2)) missed.push('outerwear and top did not share a row');
-    // and the toggle has to get back to the grid
-    document.querySelector('.lay-btn[data-lay="grid"]').click();
-    await new Promise((r) => setTimeout(r, 200));
-    if (!document.querySelector('.lookbook')) missed.push('could not switch back to the grid');
+    if (!fl.querySelector('.fl-item[data-swap]')) missed.push('no piece was swappable from the lay-out');
+
+    // Cutting a piece already in the wardrobe is what lets the lay-out read
+    // as one: a photo still carrying its floor is a rectangle whatever it
+    // sits next to. It has to work, and it has to be undoable.
+    const item = state.items.find((i) => i.category === 'top');
+    const before = item.image;
+    const res = await recutItem(item, true);
+    if (!res.ok) missed.push(`forced cut refused: ${res.reason}`);
+    else if (item.image === before) missed.push('the cut changed nothing');
+    else if (!item.imageOriginal) missed.push('the original photo was not kept');
+    if (item.imageOriginal) {
+      if (_layCache.has(item.id)) missed.push('the lay-out copy outlived the photo it came from');
+      await undoRecut(item);
+      if (item.image !== before) missed.push('undo did not restore the photo');
+      if (item.imageOriginal) missed.push('undo left the spare copy behind');
+    }
+
+    // The knockout is what makes a look read as a lay-out rather than a stack
+    // of rectangles -- and it must never eat a white garment, which is the
+    // failure it is most likely to have.
+    const white = document.createElement('canvas');
+    white.width = white.height = 200;
+    const wx = white.getContext('2d', { willReadFrequently: true });
+    wx.fillStyle = '#ffffff'; wx.fillRect(0, 0, 200, 200);
+    wx.fillStyle = '#ececea'; wx.fillRect(55, 45, 90, 110);   // a pale garment
+    if (!knockOutWhite(white)) missed.push('the knockout refused a plainly cut photo');
+    else {
+      const px = wx.getImageData(0, 0, 200, 200).data;
+      const at = (x, y) => px[(y * 200 + x) * 4 + 3];
+      if (at(5, 5) !== 0) missed.push('the backdrop was not made transparent');
+      if (at(100, 100) === 0) missed.push('the knockout ate a pale garment');
+    }
     return missed;
   });
   for (const m of layMisses) failures.push(`laid out: ${m}`);
