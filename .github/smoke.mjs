@@ -68,6 +68,44 @@ try {
     if (rendered === 0) failures.push(`tab "${tab}" rendered nothing`);
   }
 
+  // Naming the colour of a photographed garment is the one thing the app has
+  // to get right before anything downstream means anything -- every outfit
+  // suggestion is built on it. It broke once in a way no page error could
+  // show: a garment small in its frame was reported as the colour of the
+  // floor behind it, confidently and with the real colour absent from the
+  // alternatives. So drive the real processPhoto over a range of sizes.
+  await page.goto(`${BASE}/the-rail.html`, { waitUntil: 'load' });
+  await page.waitForFunction(() => typeof processPhoto === 'function', { timeout: 15000 });
+  const colourMisses = await page.evaluate(async () => {
+    const shot = (hex, fill) => {
+      const W = 640, c = document.createElement('canvas');
+      c.width = c.height = W;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      const g = x.createLinearGradient(0, 0, W, W);
+      g.addColorStop(0, '#e2e2df'); g.addColorStop(1, '#cbcbc8');
+      x.fillStyle = g; x.fillRect(0, 0, W, W);
+      const S = 440, layer = document.createElement('canvas');
+      layer.width = layer.height = S;
+      DEMO_SHAPES.shoe(layer.getContext('2d'), hex, S, S, {});
+      const side = Math.round(W * fill);
+      x.drawImage(layer, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
+      return new Promise((res) => c.toBlob(
+        (b) => res(new File([b], 's.png', { type: 'image/png' })), 'image/png'));
+    };
+    const missed = [];
+    // 0.24 is a shoe on the floor photographed from standing height -- the
+    // size that used to fail. 0.6 is the framing the in-app guidance asks for.
+    for (const fill of [0.24, 0.6]) {
+      for (const want of ['purple', 'green', 'red', 'blue']) {
+        const r = await processPhoto(await shot(colorByName(want).hex, fill), true, false);
+        const got = r.colors.length ? r.colors[0].name : '(nothing)';
+        if (got !== want) missed.push(`${want} shoe at ${fill} of frame read as "${got}"`);
+      }
+    }
+    return missed;
+  });
+  for (const m of colourMisses) failures.push(`colour: ${m}`);
+
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.
   const entry = await page.goto(`${BASE}/`, { waitUntil: 'load' });
