@@ -643,6 +643,12 @@
     padding:14px; font-family:'Work Sans'; font-weight:700; font-size:14px; cursor:pointer; margin-top:4px;
   }
   .btn-primary:disabled{opacity:0.5;}
+  /* Busy, not broken: dimming a disabled button reads as "you cannot press
+     this", which is not what is happening. */
+  .btn-primary.working{
+    opacity:1; display:flex; align-items:center; justify-content:center; gap:9px;
+  }
+  .btn-primary.working .loading-dots span{background:var(--bone);}
   .btn-secondary{
     width:100%; background:transparent; color:rgba(239,232,216,0.7); border:1px solid var(--line); border-radius:10px;
     padding:12px; font-family:'Work Sans'; font-weight:600; font-size:13px; cursor:pointer; margin-top:8px;
@@ -1035,7 +1041,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.05';
+const APP_VERSION = '2026.08.06';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1138,7 +1144,9 @@ function harmonyBetween(n1, n2){
   }
   if(a.neutral || b.neutral){
     const col = a.neutral ? b : a;
-    return {rule:'Neutral anchor', note:'A neutral grounds the '+col.name+', letting it read as the focal point.'};
+    /* "Grounds" is the word for it, and it means nothing until you say what
+       it does: the neutral stays quiet, so the colour is the thing you see. */
+    return {rule:'Neutral anchor', note:'A neutral grounds the '+col.name+' — it stays quiet, so the '+col.name+' is what you notice.'};
   }
   const d = hueDist(a.h, b.h);
   if(d <= 35) return {rule:'Analogous', note:'Neighbours on the wheel — calm, cohesive, low-contrast.'};
@@ -2775,7 +2783,9 @@ function describeLook(items, score, ctx){
 function scorePills(score, ctx){
   const p = [];
   const grade = function(v){ return v >= 3.8 ? 'good' : (v >= 2.6 ? '' : 'warn'); };
-  p.push({cls:grade(score.colour.score),    text: score.colour.rule});
+  /* The colour rule is deliberately not a pill: the badge above the strip
+     already names it, beside the swatches it applies to, so a pill saying
+     the same two words was the same claim printed twice on every card. */
   p.push({cls:grade(score.formality.score), text: ctx.occasion + '-ready'});
   p.push({cls:grade(score.warmth.score), text: ctx.band.label+'-ready'});
   if(score.rotation.score >= 3.4) p.push({cls:'good', text:'Fresh rotation'});
@@ -5842,12 +5852,33 @@ function attachDynamicHandlers(){
   on('pickAnchorBtn', openAnchorPicker);
   on('openBuilderBtn', function(){ openBuilder({}); });
 
-  on('getOutfitBtn', function(){
-    const looks = generateLooks({count:3});
-    if(!looks.length){ toast('Not enough pieces to build a look yet'); return; }
+  /* Scoring a wardrobe takes long enough to notice and not long enough to
+     explain itself, so the button said nothing and the app looked stuck. It
+     now goes busy first and yields a frame -- without the yield the browser
+     never paints the busy state, because the work blocks the same thread. */
+  on('getOutfitBtn', async function(){
+    const btn = this;
+    const was = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('working');
+    btn.innerHTML = 'Putting a look together<span class="loading-dots">'
+      + '<span></span><span></span><span></span></span>';
+    await new Promise(function(r){ requestAnimationFrame(function(){ setTimeout(r, 0); }); });
+
+    let looks = [];
+    try{ looks = generateLooks({count:3}); }
+    catch(e){ console.error('generate failed', e); }
+
+    if(!looks.length){
+      btn.disabled = false;
+      btn.classList.remove('working');
+      btn.textContent = was;
+      toast('Not enough pieces to build a look yet');
+      return;
+    }
     state.lastResult = {outfits: looks};
     state.activeOption = 0;
-    render();
+    render();          /* replaces the button along with the rest of the view */
   });
 
   /* Every look in the deck carries its own save button now, so this is
@@ -6350,6 +6381,53 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
 
   sheet.addEventListener('touchcancel', function(){ endDrag(true); }, {passive:true});
 });
+
+/* ---------- the back gesture closes what is open ----------
+   On a phone this is the reflex: a panel is open, you swipe back, the panel
+   should close. Without it the back gesture left the app entirely -- from a
+   home-screen install that means the whole thing disappears, which is a
+   heavy price for wanting to dismiss a sheet.
+
+   One history entry is pushed when the first sheet opens and given back when
+   the last one closes, so the app never accumulates entries and a real back
+   from the app itself still leaves. */
+(function(){
+  const overlays = Array.prototype.slice.call(document.querySelectorAll('.sheet-overlay'));
+  if(!overlays.length || !window.history || !history.pushState) return;
+
+  let owned = false;         /* is one of our entries on the stack? */
+  let fromBack = false;      /* are we closing because of a back, not a tap? */
+
+  const anyOpen = function(){
+    return overlays.some(function(o){ return o.classList.contains('open'); });
+  };
+
+  const sync = function(){
+    const open = anyOpen();
+    if(open && !owned){
+      history.pushState({railSheet:true}, '');
+      owned = true;
+    }else if(!open && owned && !fromBack){
+      /* Closed by a tap or a drag: hand the entry back so the stack does not
+         grow one deeper every time a sheet is opened and dismissed. */
+      owned = false;
+      history.back();
+    }
+  };
+
+  overlays.forEach(function(o){
+    new MutationObserver(sync).observe(o, {attributes:true, attributeFilter:['class']});
+  });
+
+  window.addEventListener('popstate', function(){
+    if(!anyOpen()){ owned = false; return; }
+    fromBack = true;
+    owned = false;
+    overlays.forEach(function(o){ o.classList.remove('open'); });
+    /* The observers fire during this tick; let them see fromBack. */
+    setTimeout(function(){ fromBack = false; }, 0);
+  });
+})();
 
 /* Tapping the dimmed area outside a sheet closes it, which the detail sheet
    already did and the other two did not. The add sheet is deliberately left

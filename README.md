@@ -98,15 +98,16 @@ wear history stay in your browser's storage and are never uploaded anywhere.
 
 ## What talks to the network
 
-Three external references, no API key for any of them, and nothing that is
-told anything about your wardrobe:
+One external reference, no API key, and nothing that is told anything about
+your wardrobe:
 
 | What | Why | If it fails |
 |---|---|---|
 | `fonts.googleapis.com` | Fraunces + Work Sans | Falls back to system fonts |
-| `pinterest.com`, `google.com` | Outbound "find similar" links | — |
 
-Nothing is fetched to make a suggestion. How cold it is out is a choice you
+The only other request is to `version.json` on this same origin, which is how
+the app tells you whether it is the current copy. There are no outbound links
+to anywhere; nothing is fetched to make a suggestion. How cold it is out is a choice you
 make on the Today tab — Cold, Mild or Warm — rather than something the app
 asks a weather service about behind your back.
 
@@ -156,6 +157,20 @@ overcoat" is understood as formal, warm, and outerwear without you tagging it.
 
 **What am I missing?** counts how many workable outfits your wardrobe can
 already produce, then works out which single unowned piece would add the most.
+
+Every look shows a swatch strip with the rule that fits it — *Analogous*,
+*Neutral anchor*, *Complementary* and so on — and one sentence saying what that
+rule is doing in this particular look. The rule is named once, on the strip
+beside the colours it describes, rather than repeated as a pill in the row
+below.
+
+## The back gesture
+
+Swiping back, or pressing Back, closes whatever panel is open instead of
+leaving the app. One history entry is pushed when the first sheet opens and
+handed back when the last one closes, so the stack does not grow a level deeper
+every time you open and dismiss a sheet — and a back press with nothing open
+still exits, as it should.
 
 ## Versions
 
