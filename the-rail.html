@@ -590,6 +590,9 @@
   .batch-fields{display:flex; flex-direction:column; gap:4px; font-size:11px;}
   .batch-name{background:rgba(255,255,255,0.08); border:none; padding:5px 6px; color:var(--bone); border-radius:4px; font-family:'Work Sans'; font-size:11px;}
   .batch-cat{background:rgba(255,255,255,0.08); border:none; padding:4px 6px; color:var(--bone); border-radius:4px; font-family:'Work Sans'; font-size:10px;}
+  /* An unanswered category is the one thing on this card that stops the save,
+     so it is the one thing outlined. */
+  .batch-cat.needs{box-shadow:inset 0 0 0 1px var(--wine); background:rgba(143,46,57,0.18);}
   .batch-colors{display:flex; gap:3px; flex-wrap:wrap;}
   .batch-cut.retry{background:rgba(255,255,255,0.14); color:var(--bone);}
   .batch-guess.dim{color:rgba(239,232,216,0.38); line-height:1.35;}
@@ -1041,7 +1044,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.07';
+const APP_VERSION = '2026.08.08';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1776,6 +1779,41 @@ function cutOutBackground(canvas, opts){
   };
 }
 
+/* Which category is this silhouette, if the silhouette is sure enough to say?
+   The cut-out already measures the subject's bounding box, and until now
+   nothing read it, so every photographed piece was filed as a top until you
+   typed a name with a garment word in it -- which meant a photograph of shoes
+   with no name became a top, silently.
+
+   What the measurements will and will not support, taken off the app's own
+   garment renders at three framings and three positions in frame:
+
+     shoe 0.53   knit 0.65   sneaker 0.67   top 0.70
+     skirt 0.83  outerwear 0.84   dress 1.09   boot 1.25   bottom 1.71   (height/width)
+
+   So height against width separates trousers cleanly -- nothing else comes
+   near 1.5 -- and separates nothing else at all. A shoe at 0.53 and a sneaker
+   at 0.67 sit either side of a knit at 0.65: shape alone cannot tell footwear
+   from a folded jumper, and any threshold that caught the sneaker would claim
+   half the tops as well.
+
+   Footwear therefore needs a second, independent condition: wide *and* small.
+   No garment in the table is both. Area is not an intrinsic property -- it
+   says as much about where you stood as what you photographed -- which is why
+   it is only ever used to *withhold* the footwear guess, never to make one on
+   its own.
+
+   Everything else abstains and keeps the default. A guess that is quietly
+   wrong costs more than no guess at all, because you find it weeks later in
+   your stats rather than at the moment you could have corrected it. Typing a
+   name still overrides this, and so does the dropdown. */
+function guessCategoryFromShape(shape){
+  if(!shape) return null;
+  if(shape.aspect >= 1.5) return 'bottom';
+  if(shape.aspect <= 0.62 && shape.area <= 0.08) return 'footwear';
+  return null;
+}
+
 /* ---------- white balance ----------
    Every colour judgement below assumes the photo was lit by something close to
    daylight. Indoors it never is: a warm bulb multiplies the whole frame toward
@@ -2122,6 +2160,19 @@ async function processPhoto(file, doCutout, force){
   }
   const colors = detectColors(measure, cut.applied ? cut.mask : null);
 
+  /* The silhouette is worth measuring even when you have the cut-out switched
+     off: wanting to keep the background is not a statement about what the
+     thing is. cutOutBackground paints the canvas it is handed, so that case
+     gets a throwaway copy. A cut that was *declined* is not retried -- it
+     would decline again for the same reason. */
+  let shape = cut.applied ? cut.shape : null;
+  if(!doCutout){
+    try{
+      const probe = cutOutBackground(drawToCanvas(img, 420), {force:force});
+      if(probe.applied) shape = probe.shape;
+    }catch(e){ /* shape is a nicety; never let it cost you the photo */ }
+  }
+
   /* store at 520px — plenty for a phone screen, kind to the storage quota */
   const store = drawToCanvas(img, 520);
   let cutStore = {applied:false};
@@ -2141,7 +2192,8 @@ async function processPhoto(file, doCutout, force){
     originalUrl: originalUrl,
     cutApplied: cutStore.applied,
     cutReason: cutStore.applied ? null : (cut.reason || null),
-    colors: colors
+    colors: colors,
+    category: guessCategoryFromShape(shape)   /* null when the shape is not telling */
   };
 }
 
@@ -4660,7 +4712,7 @@ async function handleIncomingFiles(fileList){
   let skipped = 0;
 
   /* placeholder cards appear immediately so the sheet never looks frozen */
-  files.forEach(function(){ batchQueue.push({pending:true, selected:true, name:'', category:'top', color:null}); });
+  files.forEach(function(){ batchQueue.push({pending:true, selected:true, name:'', category:'', color:null}); });
   renderBatchQueue();
 
   for(let n=0; n<files.length; n++){
@@ -4677,7 +4729,13 @@ async function handleIncomingFiles(fileList){
         file: files[n],
         colors: res.colors || [],
         name: '',
-        category: 'top',
+        /* The silhouette gets first say, and only speaks when it is sure.
+           When it cannot tell, this is left empty rather than defaulting to
+           'top': a default is a guess wearing a straight face, and the whole
+           point is not to file your shoes as a shirt without saying so. An
+           empty category blocks the save until it is answered. Typing a name
+           answers it, and so does the dropdown. */
+        category: res.category || '',
         categoryAuto: true,
         color: top,
         selected: true
@@ -4745,7 +4803,9 @@ function renderBatchCard(b, idx){
     + '<img src="'+(b.cutApplied ? b.dataUrl : b.originalUrl)+'" alt="">'
     + '<div class="batch-fields">'
     +   '<input type="text" class="batch-name" placeholder="'+escapeHtml(suggestion)+'" value="'+escapeHtml(b.name)+'">'
-    +   '<select class="batch-cat">'+categoryOptions(b.category)+'</select>'
+    +   '<select class="batch-cat'+(b.category?'':' needs')+'">'
+    +     (b.category ? '' : '<option value="" selected>which is it?</option>')
+    +     categoryOptions(b.category)+'</select>'
     +   (guesses.length ? '<div class="batch-guess">read: '+escapeHtml(b.color||'—')+'</div>' : '')
     +   (!b.cutAvailable && b.cutReason && b.cutReason !== 'off'
           ? '<div class="batch-guess dim">' + escapeHtml(cutReasonText(b.cutReason)) + '</div>' : '')
@@ -4773,6 +4833,14 @@ function bindBatchCard(card){
 
   const nameEl = card.querySelector('.batch-name');
   const catEl  = card.querySelector('.batch-cat');
+  /* Answering the category is what releases the save, so both routes to an
+     answer -- typing a name, or picking from the list -- have to clear the
+     outline as well as set the value. */
+  const markAnswered = function(){
+    catEl.classList.toggle('needs', !b.category);
+    const blank = catEl.querySelector('option[value=""]');
+    if(blank && b.category) blank.remove();
+  };
   nameEl.oninput = function(e){
     b.name = e.target.value;
     /* typing "black jordan 1" should quietly select Footwear for you */
@@ -4781,11 +4849,17 @@ function bindBatchCard(card){
       if(inf.matched && inf.category !== b.category){
         b.category = inf.category;
         catEl.value = inf.category;
+        markAnswered();
       }
     }
     updateBatchUI();
   };
-  catEl.onchange = function(e){ b.category = e.target.value; b.categoryAuto = false; };
+  catEl.onchange = function(e){
+    b.category = e.target.value;
+    b.categoryAuto = false;
+    markAnswered();
+    updateBatchUI();
+  };
 
   card.querySelectorAll('.batch-color-dot').forEach(function(dot){
     dot.onclick = function(){
@@ -4868,13 +4942,24 @@ function updateBatchUI(){
       progEl.innerHTML = '<div class="bp-bar"><div class="bp-fill" style="width:'+Math.round(done/total*100)+'%"></div></div>'
         + '<div class="bp-text">Reading colours — '+done+' of '+total+' done</div>';
     }else{
-      progEl.innerHTML = '<div class="bp-text ok">✓ '+ready.length+' read. Names are optional — anything left blank uses the suggestion.</div>';
+      /* The count of unanswered categories is the useful thing to say here:
+         with a dozen photos on screen it is otherwise not obvious why the
+         button will not press, or which card is holding it up. */
+      const need = ready.filter(function(b){ return b.selected && !b.category; }).length;
+      progEl.innerHTML = need
+        ? '<div class="bp-text">✓ '+ready.length+' read. '+need+' still need'+(need===1?'s':'')
+          +' a category — the outlined ones.</div>'
+        : '<div class="bp-text ok">✓ '+ready.length+' read. Names are optional — anything left blank uses the suggestion.</div>';
     }
   }
   const countEl = document.getElementById('selectedCount');
   if(countEl) countEl.textContent = sel + ' selected';
   const saveEl = document.getElementById('saveBatchBtn');
-  if(saveEl) saveEl.disabled = sel===0 || pending>0;
+  const unanswered = ready.filter(function(b){ return b.selected && !b.category; }).length;
+  if(saveEl){
+    saveEl.disabled = sel===0 || pending>0 || unanswered>0;
+    saveEl.textContent = unanswered ? 'Choose '+unanswered+' categor'+(unanswered===1?'y':'ies') : 'Add selected';
+  }
 }
 
 /* bulk category assignment — the fast path for "these eight are all shoes" */
@@ -4907,6 +4992,11 @@ document.getElementById('saveBatchBtn').onclick = async function(){
   const btn = this;
   const toAdd = batchQueue.filter(function(b){ return b && !b.pending && b.selected; });
   if(toAdd.length===0){ toast('Select at least one piece'); return; }
+  /* The button is disabled while anything is unanswered, so this should be
+     unreachable -- but it is the last point before a piece is written to
+     storage with no idea what it is, and that is worth a belt as well. */
+  const unanswered = toAdd.filter(function(b){ return !b.category; }).length;
+  if(unanswered){ toast('Choose a category for '+unanswered+' piece'+(unanswered===1?'':'s')); return; }
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
