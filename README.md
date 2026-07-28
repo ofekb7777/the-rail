@@ -140,6 +140,43 @@ outer edge of the photo. Every rule below is one the code actually applies.
 
 The same list is in the app, under *Add piece*.
 
+### What the photo decides, and what it asks you
+
+Two things are read off the picture, and they are read with very different
+confidence.
+
+**The colour** is measured, and it is reliable. Across 78 test photographs —
+six colours over warm and cool light, dark, white, wood, green and purple
+surfaces, and four framings — every hue read correctly. The misses left are
+neutrals: black and white against cluttered edges, and white under a warm bulb,
+which is the documented limit of the illuminant estimate. If the reading is not
+what you see, the four next-best candidates are offered as dots beside it.
+
+Note that colour survives a *refused* cut-out. The two are independent: the app
+can decline to remove a background and still name the garment correctly, down to
+about a third of a percent of the frame.
+
+**The category is guessed only when the silhouette is unmistakable**, and
+otherwise it asks. Measured off the app's own garment renders, height against
+width comes out as:
+
+| shoe | knit | sneaker | top | skirt | outerwear | dress | boot | bottom |
+|---|---|---|---|---|---|---|---|---|
+| 0.53 | 0.65 | 0.67 | 0.70 | 0.83 | 0.84 | 1.09 | 1.25 | 1.71 |
+
+Which separates trousers cleanly — nothing else comes near 1.5 — and separates
+nothing else at all. A shoe at 0.53 and a sneaker at 0.67 sit either side of a
+folded knit at 0.65, so no threshold on shape alone can tell footwear from a
+jumper without claiming half the tops too. Footwear therefore needs a second,
+independent condition: wide *and* small. No garment is both.
+
+Everything else is left blank and outlined, and the save is held until you
+answer it. That is deliberate. The previous behaviour defaulted to *Top*, which
+meant photographing your shoes and not typing a name filed them as a shirt,
+silently — and you would find out weeks later in your stats rather than at the
+moment you could have fixed it. Typing a name still sets the category on its
+own, so "purple shoes" or "jordan 1" needs no dropdown.
+
 ## How the suggestions work
 
 There is no language model here. Outfits are scored on five axes:
