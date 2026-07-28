@@ -458,6 +458,63 @@
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
   .why-colour{display:flex; gap:12px; align-items:center; margin-top:10px;}
+  /* Everything but the wheel wants the card's full width, so the note drops
+     below instead of being squeezed into a column beside it. */
+  .why-colour.stacked{flex-direction:column; align-items:stretch; gap:8px;}
+
+  .cv-row{display:flex; gap:6px; margin-top:10px;}
+  .cv-btn{
+    flex:1; padding:8px 4px; border-radius:9px; border:1px solid var(--line);
+    background:transparent; color:rgba(239,232,216,0.65);
+    font-family:'Work Sans'; font-size:12px; font-weight:700; cursor:pointer;
+    transition:background var(--press), color var(--press), border-color var(--press), transform var(--press);
+  }
+  .cv-btn:active{transform:scale(0.96);}
+  .cv-btn.on{background:var(--mustard); border-color:var(--mustard); color:#2a2010;}
+
+  /* A — hue strip */
+  .cs-wrap{position:relative; height:30px; margin:2px 0 0;}
+  .cs-bar{
+    position:absolute; top:13px; left:0; right:0; height:9px; border-radius:5px;
+    background:linear-gradient(to right,hsl(0,62%,55%),hsl(60,62%,55%),hsl(120,62%,55%),
+      hsl(180,62%,55%),hsl(240,62%,55%),hsl(300,62%,55%),hsl(360,62%,55%));
+  }
+  .cs-mk{position:absolute; top:0; transform:translateX(-50%); text-align:center;}
+  .cs-dot{
+    display:block; width:15px; height:15px; border-radius:50%; border:2px solid #efe8d8;
+    box-shadow:0 0 0 1px rgba(27,33,48,0.35);
+  }
+  .cs-tick{display:block; width:2px; height:8px; background:rgba(27,33,48,0.5); margin:1px auto 0;}
+  .cs-gap{font-size:11.5px; font-weight:700; color:#1b2130; margin-top:2px;}
+  .cs-ground{font-size:11px; color:#6b6455; margin-top:5px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
+  .cs-chip{
+    display:inline-flex; align-items:center; gap:4px; background:rgba(27,33,48,0.07);
+    padding:2px 7px; border-radius:9px; font-size:10.5px;
+  }
+  .cs-chip i{width:9px; height:9px; border-radius:3px; display:inline-block;}
+
+  /* B — pair by pair */
+  .cp-row{display:flex; gap:7px; align-items:center; margin-bottom:14px;}
+  .cp-row:last-child{margin-bottom:2px;}
+  .cp-sw{width:22px; height:22px; border-radius:6px; flex:none; box-shadow:0 0 0 1px rgba(27,33,48,0.25);}
+  .cp-meta{flex:1; min-width:0;}
+  .cp-rule{font-size:11.5px; font-weight:700;}
+  .cp-bars{display:flex; gap:12px; margin-top:4px;}
+  .cp-bar{flex:1; position:relative; height:5px; background:rgba(27,33,48,0.1); border-radius:3px;}
+  .cp-bar i{position:absolute; left:0; top:0; height:5px; background:#8f2e39; border-radius:3px; opacity:0.75;}
+  .cp-bar b{position:absolute; top:7px; left:0; font-size:9.5px; font-weight:600; color:#6b6455; white-space:nowrap;}
+  .cp-solo{font-size:12px; color:#5a5445;}
+
+  /* C — roles */
+  .cr-stack{
+    display:flex; height:26px; border-radius:7px; overflow:hidden;
+    box-shadow:0 0 0 1px rgba(27,33,48,0.2);
+  }
+  .cr-stack span{display:block;}
+  .cr-roles{display:flex; gap:11px; flex-wrap:wrap; margin-top:7px;}
+  .cr-role{font-size:10.5px; color:#5a5445; display:inline-flex; align-items:center; gap:4px;}
+  .cr-role i{width:10px; height:10px; border-radius:3px; display:inline-block;}
+  .cr-role em{color:#8f2e39; font-style:normal; font-weight:700;}
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   .wheel-wrap{flex:none; text-align:center;}
   .wheel-rule{
@@ -1036,7 +1093,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.02';
+const APP_VERSION = '2026.08.03';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1355,6 +1412,7 @@ let state = {
   swipeHintSeen: false,
   reorderHintSeen: false,
   update: {status:'unknown', latest:null, checkedAt:0},   /* 'current' | 'stale' | 'offline' | 'unknown' */
+  colourView: 'wheel',   /* which colour explanation to draw — on trial */
   showGaps: false,
   gapResult: null,
   cutout: true,
@@ -1455,6 +1513,7 @@ async function loadAll(){
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
+  if(prefs.colourView) state.colourView = colourView(prefs.colourView).v;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1483,7 +1542,8 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen
+    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen,
+    colourView: state.colourView
   });
 }
 
@@ -1496,7 +1556,7 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     items: state.items, outfits: state.outfits,
     wearLog: state.wearLog, plans: state.plans,
-    prefs: {cutout: state.cutout, temp: state.temp}
+    prefs: {cutout: state.cutout, temp: state.temp, colourView: state.colourView}
   };
   try{
     const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
@@ -3612,6 +3672,169 @@ function renderLookbook(outfit, allowSwap){
    outward. Neutrals therefore fall near the middle on their own, which is
    exactly what "a neutral grounds the colour" means -- no special case
    needed to say it. */
+/* ---------- four ways of showing the same thing ----------
+   All of these answer one question -- why do these colours work together --
+   and they disagree about what is worth showing. The wheel shows geometry,
+   the strip shows hue distance, the pairs show hue AND tone, the roles show
+   what each piece is doing. Which is best is a matter of taste, so the taste
+   is a setting for now: pick one in Settings and live with it on real
+   clothes for a while.
+
+   Tone only appears in the pairs view, and tone is doing half the work in a
+   wardrobe that is mostly neutral -- a black-and-white pairing lives or dies
+   on it while its hue distance is zero. That is the argument for keeping the
+   pairs view when the others are eventually dropped. */
+function outfitColours(outfit){
+  const items = (outfit.itemIds || [])
+    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
+    .filter(Boolean);
+  return uniq(items.map(function(i){ return i.color; })).slice(0, 4);
+}
+
+/* Chroma, not HSL saturation: saturation is inflated near white and black,
+   which had this palette's white reporting 20% and being drawn as a colour. */
+function colourChroma(name){
+  const c = hexToRgb(colorByName(name).hex);
+  return Math.max(c.r,c.g,c.b) - Math.min(c.r,c.g,c.b);
+}
+function colourFlat(name){ return colourChroma(name) < 18; }
+
+function hueGap(a, b){
+  let d = Math.abs(hexToHsl(colorByName(a).hex).h - hexToHsl(colorByName(b).hex).h);
+  if(d > 180) d = 360 - d;
+  return d;
+}
+function toneGap(a, b){
+  return Math.abs(hexToHsl(colorByName(a).hex).l - hexToHsl(colorByName(b).hex).l);
+}
+
+/* A -- where the hues fall on a spectrum, with the hueless ones named rather
+   than crowded into a middle they have no business being in. */
+function colourStrip(outfit){
+  const names = outfitColours(outfit);
+  if(!names.length) return '';
+  const hued = names.filter(function(n){ return !colourFlat(n); });
+  const flat = names.filter(colourFlat);
+
+  const marks = hued.map(function(n){
+    const x = hexToHsl(colorByName(n).hex).h / 360 * 100;
+    return '<div class="cs-mk" style="left:'+x.toFixed(1)+'%">'
+      + '<span class="cs-dot" style="background:'+colorByName(n).hex+'"></span>'
+      + '<span class="cs-tick"></span></div>';
+  }).join('');
+
+  let gap = '';
+  if(hued.length >= 2){
+    let widest = 0, pair = null;
+    for(let i=0;i<hued.length;i++) for(let j=i+1;j<hued.length;j++){
+      const d = hueGap(hued[i], hued[j]);
+      if(d > widest){ widest = d; pair = [hued[i], hued[j]]; }
+    }
+    const word = widest < 35 ? 'neighbours on the wheel'
+      : (widest >= 150 ? 'opposite each other' : (widest >= 100 ? 'a wide gap' : 'a deliberate gap'));
+    gap = '<div class="cs-gap">'+Math.round(widest)+'° apart — '+word+'</div>';
+  }else if(hued.length === 1){
+    gap = '<div class="cs-gap">One hue, carried alone</div>';
+  }else{
+    gap = '<div class="cs-gap">No hues at all — this look is built on tone</div>';
+  }
+
+  return '<div class="cs">'
+    + '<div class="cs-wrap"><div class="cs-bar"></div>'+marks+'</div>'
+    + gap
+    + (flat.length
+        ? '<div class="cs-ground">grounded by '+flat.map(function(n){
+            return '<span class="cs-chip"><i style="background:'+colorByName(n).hex+'"></i>'+escapeHtml(n)+'</span>';
+          }).join('')+'</div>'
+        : '')
+    + '</div>';
+}
+
+/* B -- every pair, with both distances that matter. The only view that shows
+   tone, which is what makes black with white work and grey with silver
+   flat, while their hue distance is identical at zero. */
+function colourPairs(outfit){
+  const names = outfitColours(outfit);
+  if(names.length < 2){
+    return '<div class="cp"><div class="cp-solo">A single colour — nothing to pair it against.</div></div>';
+  }
+  const pairs = [];
+  for(let i=0;i<names.length;i++) for(let j=i+1;j<names.length;j++) pairs.push([names[i], names[j]]);
+
+  return '<div class="cp">' + pairs.slice(0,3).map(function(p){
+    const a = p[0], b = p[1];
+    const bothHued = !colourFlat(a) && !colourFlat(b);
+    const hg = bothHued ? hueGap(a,b) : 0;
+    const tg = toneGap(a,b);
+    const r = harmonyBetween(a,b);
+    return '<div class="cp-row">'
+      + '<span class="cp-sw" style="background:'+colorByName(a).hex+'"></span>'
+      + '<span class="cp-sw" style="background:'+colorByName(b).hex+'"></span>'
+      + '<div class="cp-meta">'
+      +   '<div class="cp-rule">'+escapeHtml(r.rule)+'</div>'
+      +   '<div class="cp-bars">'
+      +     '<div class="cp-bar"><i style="width:'+Math.round(hg/180*100)+'%"></i>'
+      +       '<b>'+(bothHued ? Math.round(hg)+'° hue' : 'no hue gap')+'</b></div>'
+      +     '<div class="cp-bar"><i style="width:'+Math.round(tg)+'%"></i>'
+      +       '<b>'+Math.round(tg)+'% tone</b></div>'
+      +   '</div>'
+      + '</div></div>';
+  }).join('') + '</div>';
+}
+
+/* C -- what each piece is doing. The most readable and the least explanatory:
+   it names roles rather than reasons. The widths are illustrative, not
+   measured -- the app does not know how much of you each colour covers. */
+function colourRoles(outfit){
+  const names = outfitColours(outfit);
+  if(!names.length) return '';
+  const accent = names.slice().sort(function(a,b){ return colourChroma(b)-colourChroma(a); })[0];
+  const rest = names.filter(function(n){ return n !== accent; });
+  const share = function(n){
+    if(names.length === 1) return 100;
+    return n === accent ? 24 : Math.round(76/Math.max(1, rest.length));
+  };
+  const role = function(n){
+    /* One colour is not an accent -- there is nothing for it to accent
+       against. It simply is the look. */
+    if(names.length === 1) return 'carries the look';
+    if(n === accent) return colourFlat(n) ? 'leads' : 'accent';
+    return colourFlat(n) ? 'grounds' : 'supports';
+  };
+  return '<div class="cr">'
+    + '<div class="cr-stack">'+names.map(function(n){
+        return '<span style="background:'+colorByName(n).hex+';width:'+share(n)+'%"></span>';
+      }).join('')+'</div>'
+    + '<div class="cr-roles">'+names.map(function(n){
+        return '<span class="cr-role"><i style="background:'+colorByName(n).hex+'"></i>'
+          + escapeHtml(n)+' <em>'+role(n)+'</em></span>';
+      }).join('')+'</div>'
+    + '</div>';
+}
+
+const COLOUR_VIEWS = [
+  {v:'wheel', label:'Wheel',  fn:function(o){ return colourWheel(o); },  wide:false},
+  {v:'strip', label:'Strip',  fn:function(o){ return colourStrip(o); },  wide:true},
+  {v:'pairs', label:'Pairs',  fn:function(o){ return colourPairs(o); },  wide:true},
+  {v:'roles', label:'Roles',  fn:function(o){ return colourRoles(o); },  wide:true}
+];
+function colourView(v){
+  for(let i=0;i<COLOUR_VIEWS.length;i++) if(COLOUR_VIEWS[i].v === v) return COLOUR_VIEWS[i];
+  return COLOUR_VIEWS[0];
+}
+
+/* The strip, the pairs and the roles all want the full width of the card, so
+   the note goes underneath them rather than beside. Only the wheel is square
+   enough to sit next to it. */
+function colourExplainer(outfit){
+  const view = colourView(state.colourView);
+  const body = view.fn(outfit) || '';
+  if(!body) return '';
+  const note = outfit.colorNote
+    ? '<div class="why-txt">'+escapeHtml(outfit.colorNote)+'</div>' : '';
+  return '<div class="why-colour'+(view.wide ? ' stacked' : '')+'">'+body+note+'</div>';
+}
+
 function colourWheel(outfit){
   const items = (outfit.itemIds || [])
     .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
@@ -3727,12 +3950,7 @@ function renderOutfitResult(outfit, saved, savedIdx){
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
     + (pills ? '<div class="score-strip">'+pills+'</div>' : '')
-    + (outfit.colorNote
-        ? '<div class="why-colour">'
-          +   colourWheel(outfit)
-          +   '<div class="why-txt">'+escapeHtml(outfit.colorNote)+'</div>'
-          + '</div>'
-        : '')
+    + colourExplainer(outfit)
     + (saved || outfit.__saved
         ? '<div class="saved-flag">✓ Saved to your looks</div>'
           + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
@@ -5638,6 +5856,14 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
+    +   '<div class="sb-title">Why the colours work</div>'
+    +   '<div class="sb-sub">Four ways of showing the same thing on each outfit card. On trial — pick whichever you find yourself actually reading, and the others can go.</div>'
+    +   '<div class="cv-row">'+COLOUR_VIEWS.map(function(v){
+          return '<button class="cv-btn '+(state.colourView===v.v?'on':'')+'" data-cview="'+v.v+'">'+v.label+'</button>';
+        }).join('')+'</div>'
+    + '</div>'
+
+    + '<div class="settings-block">'
     +   '<div class="sb-title">Diagnostics</div>'
     +   '<div class="sb-sub">If something is behaving oddly, this gathers what the app can see about this device — version, storage, layout, service worker — as text you can send on.</div>'
     +   '<button class="btn-secondary" id="diagRunBtn" style="margin-top:10px;">Run diagnostics</button>'
@@ -5686,6 +5912,15 @@ function bindSettingsHandlers(){
     cutoutBtn.classList.toggle('on', state.cutout);
     await savePrefs();
   };
+
+  document.querySelectorAll('[data-cview]').forEach(function(b){
+    b.onclick = async function(){
+      state.colourView = colourView(b.dataset.cview).v;
+      await savePrefs();
+      renderSettingsBody();
+      render();          /* the cards behind the sheet change with it */
+    };
+  });
 
   const diagRun = document.getElementById('diagRunBtn');
   if(diagRun) diagRun.onclick = async function(){
