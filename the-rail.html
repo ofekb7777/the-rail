@@ -1041,7 +1041,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.06';
+const APP_VERSION = '2026.08.07';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1927,25 +1927,42 @@ function detectColors(canvas, mask){
   const maxR = Math.sqrt(cx*cx + cy*cy);
   const step = Math.max(1, Math.round(Math.min(w,h)/90));
 
-  /* Pass 1 discounts the backdrop. If that leaves too little to judge -- a
-     white shirt on a white sweep, where garment and surface are the same
-     colour -- pass 2 repeats without it rather than returning nothing.
-     Measuring what survives is the honest test: an earlier version instead
-     asked whether the backdrop colour also filled the centre of the frame,
-     which quietly inverted for small items, since the middle of a photo of a
-     shoe is mostly floor. */
+  /* Every attempt but the last discounts the backdrop. If that leaves too
+     little to judge -- a white shirt on a white sweep, where garment and
+     surface are the same colour -- the final attempt repeats without it
+     rather than returning nothing. Measuring what survives is the honest
+     test: an earlier version instead asked whether the backdrop colour also
+     filled the centre of the frame, which quietly inverted for small items,
+     since the middle of a photo of a shoe is mostly floor.
+
+     The grid is tried at three densities before that fallback, because "too
+     little survived" has two very different causes. One is that the garment
+     really is the backdrop's colour. The other is simply that the garment is
+     small and a coarse grid steps over it -- a shoe photographed from
+     standing height caught barely a dozen sample points, fell under the bar,
+     and the fallback then reported the floor's colour with total confidence.
+     Looking harder distinguishes them: if the thing is there, a finer grid
+     finds it; if it is genuinely the same colour as the backdrop, no density
+     helps and the fallback is right. Full density is roughly twenty-five
+     times the work, so it is reached only for the small items that need it. */
+  const steps = [step, Math.max(1, Math.round(step/2)), 1]
+    .filter(function(s, i, a){ return a.indexOf(s) === i; });
+  const ATTEMPTS = steps.map(function(s){ return {reject:backdrop, step:s}; });
+  ATTEMPTS.push({reject:[], step:step});
+
   let bucket, sampled, keptL, keptA, keptB;
-  for(let pass=0; pass<2; pass++){
+  for(let pass=0; pass<ATTEMPTS.length; pass++){
     keptL = []; keptA = []; keptB = [];
-    const reject = pass === 0 ? backdrop : [];
+    const reject = ATTEMPTS[pass].reject;
+    const sstep = ATTEMPTS[pass].step;
     const informed = !!mask || reject.length > 0;
     let candidates = 0;
     bucket = {};
     COLORS.forEach(function(c){ bucket[c.name] = 0; });
     sampled = 0;
 
-    for(let y=Math.floor(h*0.06); y<h*0.94; y+=step){
-      for(let x=Math.floor(w*0.06); x<w*0.94; x+=step){
+    for(let y=Math.floor(h*0.06); y<h*0.94; y+=sstep){
+      for(let x=Math.floor(w*0.06); x<w*0.94; x+=sstep){
         const idx = y*w + x;
         if(mask && mask[idx]) continue;              /* known background */
         const p = idx*4;
@@ -1994,9 +2011,24 @@ function detectColors(canvas, mask){
     }
     /* A garment can legitimately be a small part of its photo -- a shoe covers
        barely a tenth of the frame -- so the bar is only that *something*
-       recognisable survived, not that most of the picture did. */
+       recognisable survived, not that most of the picture did.
+
+       What counts as enough evidence is an absolute number of pixels, not a
+       share of the frame. At 4% of the frame the bar did the opposite of what
+       it says: a shoe shot from standing height covers about 1%, fell under
+       it, and the backdrop model was thrown away -- so the fallback kept
+       every pixel and the answer came back as the colour of the floor, with
+       the shoe nowhere in the alternatives.
+
+       A share of the frame is also the one test a finer grid cannot rescue,
+       since both sides of it scale with the grid together. Counting survivors
+       is what makes looking harder mean anything. The fractional test is kept
+       only at a token level, to catch a rejection that left nothing but a rim
+       of edge pixels; the real defence against having subtracted the garment
+       itself is the lightness-and-chroma check below, which asks what the
+       survivors *are* rather than how many. */
     if(reject.length === 0) break;
-    if(sampled < 60 || sampled < candidates * 0.04) continue;
+    if(sampled < 60 || sampled < candidates * 0.002) continue;
 
     /* Survivor count alone cannot tell a small brown shoe on a white sweep
        from a white shirt on the same sweep: both leave about a tenth of the
