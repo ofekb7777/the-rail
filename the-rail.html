@@ -457,24 +457,11 @@
   .lb-swatches{display:flex; gap:4px; align-items:center; margin:10px 0 2px;}
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
-  .why-colour{display:flex; gap:12px; align-items:center; margin-top:10px;}
-  /* Everything but the wheel wants the card's full width, so the note drops
-     below instead of being squeezed into a column beside it. */
-  .why-colour.stacked{flex-direction:column; align-items:stretch; gap:8px;}
+  .why-colour{margin-top:10px;}
 
 
 
 
-  /* C — roles */
-  .cr-stack{
-    display:flex; height:26px; border-radius:7px; overflow:hidden;
-    box-shadow:0 0 0 1px rgba(27,33,48,0.2);
-  }
-  .cr-stack span{display:block;}
-  .cr-roles{display:flex; gap:11px; flex-wrap:wrap; margin-top:7px;}
-  .cr-role{font-size:10.5px; color:#5a5445; display:inline-flex; align-items:center; gap:4px;}
-  .cr-role i{width:10px; height:10px; border-radius:3px; display:inline-block;}
-  .cr-role em{color:#8f2e39; font-style:normal; font-weight:700;}
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   .combo-row{
     display:flex; gap:11px; align-items:center; padding:10px; margin-bottom:7px;
@@ -1048,7 +1035,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.04';
+const APP_VERSION = '2026.08.05';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -3624,89 +3611,21 @@ function renderLookbook(outfit, allowSwap){
    outward. Neutrals therefore fall near the middle on their own, which is
    exactly what "a neutral grounds the colour" means -- no special case
    needed to say it. */
-/* ---------- what each colour is doing in the look ----------
-   Four treatments were on trial for a while -- a hue wheel, a spectrum
-   strip, and a pair-by-pair table of hue and tone distances. This is the one
-   that survived, because it answers the question people actually ask about
-   an outfit: which piece is doing the talking, and which are letting it.
+/* ---------- why these colours work ----------
+   Several pictures were tried here -- a hue wheel, a spectrum strip, a
+   pair-by-pair table of hue and tone, and a bar showing what each piece was
+   doing. The last one lost to something that was already on the card: the
+   lookbook draws a swatch bar directly above this, so a second bar of the
+   same colours was the same information twice.
 
-   The widths were illustrative when this was one option among four, and that
-   was the honest complaint against it. They are measured now: each garment
-   contributes roughly the share of you that it covers, so a coat outweighs a
-   pair of shoes and the bar means something. The numbers are approximate by
-   nature -- a body is not a spreadsheet -- but they are ordered correctly,
-   which is the part that was missing. */
-const BODY_SHARE = {
-  dress:42, outerwear:38, top:24, bottom:30, footwear:10,
-  headwear:6, bag:6, jewellery:3, accessory:5
-};
-
-function outfitColours(outfit){
-  const items = (outfit.itemIds || [])
-    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
-    .filter(Boolean);
-  return uniq(items.map(function(i){ return i.color; })).slice(0, 4);
-}
-
-/* Chroma, not HSL saturation: saturation is inflated near white and black,
-   which had this palette's white reporting 20% and counting as a colour. */
-function colourChroma(name){
-  const c = hexToRgb(colorByName(name).hex);
-  return Math.max(c.r,c.g,c.b) - Math.min(c.r,c.g,c.b);
-}
-function colourFlat(name){ return colourChroma(name) < 18; }
-
-function colourRoles(outfit){
-  const items = (outfit.itemIds || [])
-    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
-    .filter(Boolean);
-  const names = outfitColours(outfit);
-  if(!names.length) return '';
-
-  /* How much of you each colour covers, summed over the pieces wearing it. */
-  const area = {};
-  names.forEach(function(n){ area[n] = 0; });
-  items.forEach(function(it){
-    if(area[it.color] === undefined) return;
-    area[it.color] += BODY_SHARE[it.category] || 12;
-  });
-  const total = names.reduce(function(t,n){ return t + area[n]; }, 0) || 1;
-
-  /* The accent is the strongest colour present, not the largest -- that is
-     what makes it an accent rather than the background. */
-  const accent = names.slice().sort(function(a,b){ return colourChroma(b)-colourChroma(a); })[0];
-  const role = function(n){
-    if(names.length === 1) return 'carries the look';
-    if(n === accent) return colourFlat(n) ? 'leads' : 'accent';
-    return colourFlat(n) ? 'grounds' : 'supports';
-  };
-
-  /* Ordered as the eye takes them in: top to bottom of the body. */
-  const ordered = names.slice().sort(function(a,b){
-    const ca = items.find(function(i){ return i.color===a; });
-    const cb = items.find(function(i){ return i.color===b; });
-    return (CAT_ORDER[ca && ca.category]||9) - (CAT_ORDER[cb && cb.category]||9);
-  });
-
-  return '<div class="cr">'
-    + '<div class="cr-stack">'+ordered.map(function(n){
-        const pct = Math.max(8, Math.round(area[n]/total*100));
-        return '<span style="background:'+colorByName(n).hex+';width:'+pct+'%" title="'
-          + escapeHtml(n)+'"></span>';
-      }).join('')+'</div>'
-    + '<div class="cr-roles">'+ordered.map(function(n){
-        return '<span class="cr-role"><i style="background:'+colorByName(n).hex+'"></i>'
-          + escapeHtml(n)+' <em>'+role(n)+'</em></span>';
-      }).join('')+'</div>'
-    + '</div>';
-}
-
+   What survives is the part nothing else says: the reason. The rule itself
+   is named in the badge above, and this is the sentence explaining it --
+   why a neutral lets a colour lead, why two neutrals a shade apart look
+   expensive, why opposites need one of them to stay an accent. */
 function colourExplainer(outfit){
-  const body = colourRoles(outfit);
-  if(!body) return '';
-  const note = outfit.colorNote
-    ? '<div class="why-txt">'+escapeHtml(outfit.colorNote)+'</div>' : '';
-  return '<div class="why-colour stacked">'+body+note+'</div>';
+  if(!outfit.colorNote) return '';
+  return '<div class="why-colour"><div class="why-txt">'
+    + escapeHtml(outfit.colorNote) + '</div></div>';
 }
 
 function renderOutfitResult(outfit, saved, savedIdx){
