@@ -454,6 +454,62 @@
     font-size:8.5px; font-weight:800; padding:3px 7px; border-radius:10px;
     text-transform:uppercase; letter-spacing:0.5px;
   }
+  /* ---------- the look, laid out ---------- */
+  .lay-toggle{
+    display:flex; gap:0; margin:0 0 10px; background:rgba(27,33,48,0.07);
+    border-radius:8px; padding:2px; width:fit-content;
+  }
+  .lay-btn{
+    border:none; background:transparent; font-family:'Work Sans'; font-size:10.5px;
+    font-weight:700; letter-spacing:0.3px; padding:5px 11px; border-radius:6px;
+    color:rgba(27,33,48,0.5); cursor:pointer; transition:background var(--press), color var(--press);
+  }
+  .lay-btn.on{background:var(--bone); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,0.13);}
+  /* A flat lay is mostly the space around the clothes -- crowd them and it
+     stops reading as a lay-out and goes back to being a collage. */
+  .flatlay{
+    background:linear-gradient(160deg, #e6e1d6, #d8d2c4);
+    border-radius:12px; padding:16px 12px 20px;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  .fl-row{
+    display:flex; justify-content:center; align-items:flex-end;
+    gap:4px; width:100%;
+  }
+  /* Garment photos are square but garments are not, so every tile carries
+     empty margin above and below. Left alone that margin stacks and the rows
+     drift apart until the look reads as three separate photographs. Pulling
+     the rows together closes the gap between the *garments*, which is the
+     spacing you are actually looking at. */
+  .fl-row + .fl-row{margin-top:-7%;}
+  /* Accessories are beside the outfit, not below the shoes: no overlap, and
+     set off by a hairline so they read as a separate group. */
+  .fl-row.fl-extras{
+    margin-top:6px; padding-top:12px; gap:10px;
+    border-top:1px solid rgba(27,33,48,0.13);
+  }
+  .fl-item{position:relative;}
+  /* contain, never cover: cropping a garment to fill a box is precisely the
+     thing this view exists to avoid.
+
+     multiply is what makes this a lay-out rather than a collage. The cut-out
+     paints the background *white* and stores JPEG, which has no transparency
+     -- so every photo, cut or not, arrives as a white rectangle. Multiplied
+     against the paper, white becomes the paper and the garment stays itself,
+     which is the same result a transparent PNG would give without changing
+     how anything is stored. The cost is that an uncut photo darkens its own
+     background instead of hiding it, which is a fair way to show that the
+     piece has not been cut. */
+  .fl-item img{
+    width:100%; height:auto; display:block; object-fit:contain;
+    mix-blend-mode:multiply;
+  }
+  .fl-swap{
+    position:absolute; right:-2px; bottom:-2px; background:var(--ink); color:var(--bone);
+    font-size:9px; font-weight:800; width:17px; height:17px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 5px rgba(0,0,0,0.3);
+  }
   .lb-swatches{display:flex; gap:4px; align-items:center; margin:10px 0 2px;}
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
@@ -529,6 +585,7 @@
 
   .swap-tip{font-size:11px; color:#6b6455; margin:10px 0 2px; letter-spacing:0.2px;}
   .lb-item[data-swap]{cursor:pointer;}
+  .fl-item[data-swap]{cursor:pointer;}
   .lb-swap{
     position:absolute; top:7px; right:7px; z-index:3;
     background:rgba(27,33,48,0.82); color:var(--bone);
@@ -1044,7 +1101,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.08';
+const APP_VERSION = '2026.08.09';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1368,6 +1425,7 @@ let state = {
   showGaps: false,
   gapResult: null,
   cutout: true,
+  flatLay: false,   /* show looks laid out as they would be worn, not as a grid */
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1465,6 +1523,7 @@ async function loadAll(){
   if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
+  if(typeof prefs.flatLay === 'boolean') state.flatLay = prefs.flatLay;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1493,7 +1552,8 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen
+    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen,
+    flatLay: state.flatLay
   });
 }
 
@@ -3664,6 +3724,82 @@ function normalizeResult(r){
 }
 
 
+/* ---------- the look, laid out ----------
+   The grid below answers "which pieces are in this?". It does not answer
+   "does this go together?", because a row of equal tiles with captions is a
+   list, and what you are actually judging is proportion and where the colours
+   sit relative to each other -- the jacket beside the shirt it opens over,
+   the trousers below both, the shoes under those.
+
+   So this arranges the same pieces the way you would lay them on a bed:
+   outer and top sharing the top row, legs beneath, shoes beneath those, with
+   the smaller things off to one side. Sizes are set per category rather than
+   per photo, because a shoe photographed close up and a coat photographed
+   from further back arrive at the same pixel dimensions and drawing them at
+   the same size is what makes a collage look wrong.
+
+   Two honest limits. Photos keep whatever background they were saved with,
+   so a look assembled from uncut photos is a grid of rectangles however it
+   is arranged -- the cut-out is what makes this read as a flat lay. And a
+   wardrobe holding two tops and no bottoms lays out as exactly that; the
+   arrangement reports the look, it does not flatter it. */
+/* Sizes are relative to each other, not to the photos: the whole look has to
+   fit on one screen or it is not showing you how it goes together, it is
+   showing you a piece at a time -- which the grid already does. */
+const LAY_ROWS = [
+  {cats:['headwear'],            w:'20%'},
+  {cats:['outerwear','top','dress'], w:null},   /* per-item, set below */
+  {cats:['bottom'],              w:'40%'},
+  {cats:['footwear'],            w:'25%'},
+  /* The small things are set apart rather than stacked into the body, because
+     they are not worn in that order -- a bag does not go below the shoes. The
+     rows above overlap to close the empty margin inside each photo; this one
+     must not, or the bag ends up sitting on the boots. */
+  {cats:['bag','jewellery','accessory'], w:'17%', cls:'fl-extras'}
+];
+/* One piece on the top row should not shrink to half the row's width just
+   because it is alone, and a dress reads as a whole outfit rather than a
+   half of one. */
+function layWidth(cat, shared){
+  if(cat === 'dress') return shared ? '34%' : '40%';
+  if(cat === 'outerwear' || cat === 'top') return shared ? '37%' : '42%';
+  return '37%';
+}
+
+function renderFlatLay(outfit, allowSwap){
+  const items = outfit.itemIds
+    .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
+    .filter(Boolean);
+  if(items.length===0) return '';
+
+  const rows = LAY_ROWS.map(function(row){
+    const inRow = items.filter(function(i){ return row.cats.indexOf(i.category) > -1; })
+      .sort(function(a,b){ return (CAT_ORDER[a.category]||9)-(CAT_ORDER[b.category]||9); });
+    if(inRow.length===0) return '';
+    const shared = inRow.length > 1;
+    const cells = inRow.map(function(it){
+      const alts = allowSwap ? swapCandidates(it, outfit.itemIds).length : 0;
+      const w = row.w || layWidth(it.category, shared);
+      return '<div class="fl-item" style="width:'+w+'"'+(alts?' data-swap="'+it.id+'"':'')+'>'
+        + '<img src="'+imgSrc(it)+'" loading="lazy" alt="'+escapeHtml(it.name)+'">'
+        + (alts ? '<span class="fl-swap">⇄</span>' : '')
+        + '</div>';
+    }).join('');
+    return '<div class="fl-row'+(row.cls?' '+row.cls:'')+'">'+cells+'</div>';
+  }).join('');
+
+  const cols = uniq(items.map(function(i){ return i.color; }));
+  const swatches = '<div class="lb-swatches">'+cols.map(function(n){
+    return '<span class="sw-bar" style="background:'+colorByName(n).hex+'"></span>';
+  }).join('')+'</div>';
+
+  /* No "your photos still have backgrounds" warning here, tempting as it is:
+     whether a stored photo was cut is not recorded on the item, so the check
+     would be a guess dressed as a fact. You can see it for yourself anyway --
+     that is rather the point of the view. */
+  return '<div class="flatlay">'+rows+'</div>'+swatches;
+}
+
 function renderLookbook(outfit, allowSwap){
   const items = outfit.itemIds
     .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
@@ -3741,7 +3877,11 @@ function renderOutfitResult(outfit, saved, savedIdx){
   return '<div class="outfit-result">'
     + '<div class="stamp">'+stamp+'</div>'
     + '<h4>'+escapeHtml(outfit.title||'Your outfit')+'</h4>'
-    + renderLookbook(outfit, !saved)
+    + '<div class="lay-toggle">'
+    +   '<button class="lay-btn'+(state.flatLay?'':' on')+'" data-lay="grid">Pieces</button>'
+    +   '<button class="lay-btn'+(state.flatLay?' on':'')+'" data-lay="lay">Laid out</button>'
+    + '</div>'
+    + (state.flatLay ? renderFlatLay(outfit, !saved) : renderLookbook(outfit, !saved))
     + (!saved ? '<div class="swap-tip">Tap any piece with ⇄ to try a different one</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
@@ -5958,6 +6098,18 @@ function attachDynamicHandlers(){
   });
   document.querySelectorAll('[data-swap]').forEach(function(el){
     el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
+  });
+
+  /* The choice is about how you want to look at outfits, not about this one
+     outfit, so it is remembered and every card follows it. */
+  document.querySelectorAll('[data-lay]').forEach(function(el){
+    el.onclick = function(){
+      const want = el.dataset.lay === 'lay';
+      if(want === state.flatLay) return;
+      state.flatLay = want;
+      savePrefs();
+      render();
+    };
   });
 
   on('toggleGaps', function(){

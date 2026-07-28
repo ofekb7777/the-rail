@@ -201,6 +201,34 @@ rule is doing in this particular look. The rule is named once, on the strip
 beside the colours it describes, rather than repeated as a pill in the row
 below.
 
+## Looking at a look
+
+Every outfit can be shown two ways, and the toggle above it remembers which
+you prefer.
+
+**Pieces** is the grid: equal tiles, captioned, one per garment. It answers
+*which things are in this?*
+
+**Laid out** arranges the same garments the way you would lay them on a bed —
+outer and top sharing the top row, legs beneath, shoes beneath those, and the
+smaller things set off below a rule. It answers the question the grid cannot,
+which is *do these go together?*, because that is a judgement about proportion
+and about where the colours sit relative to each other. Sizes are set per
+category rather than per photo, since a shoe photographed close up and a coat
+photographed from further back arrive at the same pixel dimensions, and drawing
+them the same size is what makes a collage look wrong.
+
+Pieces stay swappable in both views — anything with ⇄ has alternatives.
+
+The images are composited with `mix-blend-mode: multiply`, which is what makes
+this a lay-out rather than a collage. The cut-out paints the background *white*
+and photos are stored as JPEG, which has no transparency, so every photo — cut
+or not — arrives as a white rectangle. Multiplied against the paper, white
+becomes the paper and the garment stays itself: the same result a transparent
+PNG would give, without changing how anything is stored. The honest cost is
+that a photo you never cut darkens its own background rather than hiding it,
+which is a fair way of showing that the piece has not been cut.
+
 ## The back gesture
 
 Swiping back, or pressing Back, closes whatever panel is open instead of
