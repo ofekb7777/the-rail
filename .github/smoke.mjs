@@ -160,6 +160,43 @@ try {
   });
   for (const m of catMisses) failures.push(`category: ${m}`);
 
+  // The laid-out view arranges a look head to foot. Order is the whole point
+  // of it -- shoes above a coat is not a lay-out -- and it is decided by a
+  // table that no other test touches.
+  const layMisses = await page.evaluate(async () => {
+    await loadDemoWardrobe();
+    const pick = (c) => state.items.find((i) => i.category === c);
+    const ids = ['outerwear', 'top', 'bottom', 'footwear'].map(pick).filter(Boolean).map((i) => i.id);
+    state.flatLay = true;
+    state.lastResult = { outfits: [{ itemIds: ids, title: 'T', percent: 80, pills: [] }] };
+    state.activeOption = 0;
+    state.tab = 'today';
+    render();
+    await new Promise((r) => setTimeout(r, 200));
+    const missed = [];
+    const fl = document.querySelector('.flatlay');
+    if (!fl) return ['the laid-out view rendered nothing'];
+    const rows = [...fl.querySelectorAll('.fl-row')].map((r) =>
+      [...r.querySelectorAll('img')].map((img) => {
+        const it = state.items.find((i) => i.name === img.alt);
+        return it ? it.category : '?';
+      }));
+    const rank = { headwear: 1, outerwear: 2, dress: 2, top: 2, bottom: 3, footwear: 4 };
+    const flat = rows.flat();
+    for (let i = 1; i < flat.length; i++) {
+      if ((rank[flat[i]] || 9) < (rank[flat[i - 1]] || 9)) {
+        missed.push(`out of order: ${flat[i - 1]} above ${flat[i]}`);
+      }
+    }
+    if (!rows.some((r) => r.length === 2)) missed.push('outerwear and top did not share a row');
+    // and the toggle has to get back to the grid
+    document.querySelector('.lay-btn[data-lay="grid"]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    if (!document.querySelector('.lookbook')) missed.push('could not switch back to the grid');
+    return missed;
+  });
+  for (const m of layMisses) failures.push(`laid out: ${m}`);
+
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.
   const entry = await page.goto(`${BASE}/`, { waitUntil: 'load' });
