@@ -468,6 +468,9 @@
     border-top:1px solid rgba(27,33,48,0.13);
   }
   .fl-item{position:relative;}
+  /* Two pieces on one row overlap slightly rather than sitting apart -- laid
+     on a bed, a jacket's sleeve falls across the shirt beside it. */
+  .fl-row.fl-pair .fl-item + .fl-item{margin-left:-5%;}
   /* contain, never cover: cropping a garment to fill a box is precisely the
      thing this view exists to avoid.
 
@@ -485,18 +488,17 @@
     border-radius:10px;
     box-shadow:0 3px 10px -3px rgba(27,33,48,0.35);
   }
-  /* The reference this is modelled on puts nothing at all on the garments,
-     and every badge added here is a thing that is not clothing. So it is as
-     quiet as it can be while still being findable -- the tip under the
-     lay-out is what actually tells you the pieces are tappable. */
-  .fl-swap{
-    position:absolute; right:4px; bottom:4px;
-    background:rgba(27,33,48,0.28); color:#fff;
-    font-size:8px; font-weight:700; width:14px; height:14px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-    opacity:0.55; transition:opacity var(--press), background var(--press);
-  }
-  .fl-item:active .fl-swap{opacity:1; background:var(--ink);}
+  /* A tappable piece dips instead of wearing a badge. The badges were pinned
+     to the corner of the item's box, but an isolated piece is a small shape
+     inside a large transparent one, so they floated out in the empty space
+     looking detached from the thing they belonged to -- and the lay-out this
+     is modelled on puts nothing at all on the garments.
+
+     Press feedback goes on brightness rather than transform: the angle is set
+     inline, per piece, and an inline transform beats a stylesheet one -- a
+     scale here would simply never apply. */
+  .fl-item[data-swap]{transition:filter var(--press);}
+  .fl-item[data-swap]:active{filter:brightness(0.93);}
   .lb-swatches{display:flex; gap:4px; align-items:center; margin:10px 0 2px;}
   .lb-swatches .sw-bar{height:9px; border-radius:2px; flex:1; border:1px solid rgba(0,0,0,0.12);}
 
@@ -1051,7 +1053,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.13';
+const APP_VERSION = '2026.08.14';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -3687,26 +3689,72 @@ function layWidth(cat, shared){
   return '44%';
 }
 
+/* Nobody lays clothes out on a grid. Everything sitting dead straight and
+   perfectly centred is the tell that a machine arranged it, and it is the last
+   thing between this and looking like a photograph of a bed.
+
+   So each piece gets a few degrees and a small shove sideways. Both come from
+   the piece's own id rather than a random number, because a look that tilted
+   differently every time you opened it would be far worse than one that never
+   tilted at all -- a given garment sits the same way every time you see it. */
+function laySeed(id){
+  let h = 2166136261;
+  for(let i=0; i<id.length; i++){
+    h ^= id.charCodeAt(i);
+    h = (h * 16777619) >>> 0;
+  }
+  return h;
+}
+/* 0..1 from the id, a different draw for each `salt` */
+function layNoise(id, salt){
+  return ((laySeed(id + '|' + salt) % 1024) / 1023);
+}
+
+function layPose(it, idxInRow, count, rowIdx){
+  const n = layNoise(it.id, 'a'), m = layNoise(it.id, 'b');
+  let deg, dx;
+  if(count > 1){
+    /* Two pieces sharing a row lean away from each other, the way a jacket
+       falls open beside the shirt it is worn over. */
+    const away = idxInRow === 0 ? -1 : 1;
+    deg = away * (2.5 + n * 3.5);
+    dx  = away * (0.5 + m * 2);
+  }else{
+    /* Alternate down the page so the whole lay-out does not lean one way. */
+    const side = rowIdx % 2 === 0 ? 1 : -1;
+    deg = side * (1.2 + n * 2.6);
+    dx  = (m - 0.5) * 5;
+  }
+  return 'transform:rotate('+deg.toFixed(2)+'deg) translateX('+dx.toFixed(1)+'%);';
+}
+
 function renderFlatLay(outfit, allowSwap){
   const items = outfit.itemIds
     .map(function(id){ return state.items.find(function(i){ return i.id===id; }); })
     .filter(Boolean);
   if(items.length===0) return '';
 
+  let rowIdx = 0;
   const rows = LAY_ROWS.map(function(row){
     const inRow = items.filter(function(i){ return row.cats.indexOf(i.category) > -1; })
       .sort(function(a,b){ return (CAT_ORDER[a.category]||9)-(CAT_ORDER[b.category]||9); });
     if(inRow.length===0) return '';
     const shared = inRow.length > 1;
-    const cells = inRow.map(function(it){
+    const myRow = rowIdx++;
+    const cells = inRow.map(function(it, i){
       const alts = allowSwap ? swapCandidates(it, outfit.itemIds).length : 0;
       const w = row.w || layWidth(it.category, shared);
-      return '<div class="fl-item" style="width:'+w+'"'+(alts?' data-swap="'+it.id+'"':'')+'>'
+      /* The piece on the right sits on top where they overlap, so the outer
+         layer tucks behind the top rather than covering it. */
+      const z = i === 0 ? 1 : 2;
+      return '<div class="fl-item" style="width:'+w+';z-index:'+z+';'
+        + layPose(it, i, inRow.length, myRow) + '"'
+        + (alts?' data-swap="'+it.id+'"':'')+'>'
         + '<img src="'+imgSrc(it)+'" data-lay-img="'+it.id+'" alt="'+escapeHtml(it.name)+'">'
-        + (alts ? '<span class="fl-swap">⇄</span>' : '')
         + '</div>';
     }).join('');
-    return '<div class="fl-row'+(row.cls?' '+row.cls:'')+'">'+cells+'</div>';
+    return '<div class="fl-row'+(row.cls?' '+row.cls:'')
+      + (shared ? ' fl-pair' : '')+'">'+cells+'</div>';
   }).join('');
 
   const cols = uniq(items.map(function(i){ return i.color; }));
@@ -3768,7 +3816,7 @@ function renderOutfitResult(outfit, saved, savedIdx){
     + '<div class="stamp">'+stamp+'</div>'
     + '<h4>'+escapeHtml(outfit.title||'Your outfit')+'</h4>'
     + renderFlatLay(outfit, !saved)
-    + (!saved ? '<div class="swap-tip">Tap any piece with ⇄ to try a different one</div>' : '')
+    + (!saved ? '<div class="swap-tip">Tap a piece to swap it for another</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
     + (pills ? '<div class="score-strip">'+pills+'</div>' : '')
