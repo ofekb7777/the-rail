@@ -240,6 +240,14 @@ can be strict:
 - **A fill that takes almost the whole frame is refused** — it has clearly eaten
   the garment along with the surface. This is what saves a white shirt on a
   white sweep: the app shows the photo rather than a hole where the shirt was.
+- **A cast shadow is treated as backdrop.** A piece lying on a sheet shades it,
+  and the shadow is not the sheet's colour — so without this the garment comes
+  out with a dark blob welded to it, measured at 23% of the frame kept instead
+  of 13%. Shading is the surface *dimmed*, so a pixel that is the border colour
+  scaled down counts as background. The band is narrow on purpose: a shadow and
+  a garment that happens to be a darker shade of the surface are the same
+  pixels, and it is safer to keep a shadow than to eat a jumper. A brown piece
+  on a tan sheet survives; a tan piece on a tan sheet is refused outright.
 - **The tolerance is tighter than the old cut-out's**, because that one could be
   compared against an original and undone. This one has to be right first time,
   on every render, so it errs towards leaving a rim of backdrop rather than
