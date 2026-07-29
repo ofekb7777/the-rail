@@ -256,6 +256,49 @@ try {
       const px = pale.getContext('2d').getImageData(0, 0, 200, 200).data;
       if (px[(100 * 200 + 100) * 4 + 3] === 0) missed.push('isolation ate a white garment');
     }
+    // A piece lying on a sheet casts a shadow onto it. The shadow is not the
+    // sheet's colour, so without special handling the garment comes out with a
+    // dark blob welded to it -- measured at 23% of the frame kept instead of
+    // 13%. What must not happen while fixing that is eating a garment that is
+    // simply a darker shade of the surface.
+    const area = (c) => {
+      const px = c.getContext('2d').getImageData(0, 0, 200, 200).data;
+      let n = 0;
+      for (let i = 3; i < px.length; i += 4) if (px[i] > 128) n++;
+      return n;
+    };
+    const sheet = (withShadow, garment) => mk((x) => {
+      x.fillStyle = '#d5cfc2'; x.fillRect(0, 0, 200, 200);
+      if (withShadow) {
+        x.save();
+        x.globalAlpha = 0.3; x.filter = 'blur(9px)'; x.fillStyle = '#000';
+        // clear of the garment, or removing it changes no area at all
+        x.beginPath(); x.ellipse(100, 172, 78, 24, 0, 0, 7); x.fill();
+        x.restore();
+      }
+      x.fillStyle = garment; x.fillRect(55, 45, 90, 110);
+    });
+    const clean = sheet(false, '#2f3d66');
+    const shadowed = sheet(true, '#2f3d66');
+    if (isolateForLayout(clean) && isolateForLayout(shadowed)) {
+      const grew = area(shadowed) / Math.max(1, area(clean));
+      if (grew > 1.25) missed.push(`a cast shadow was kept with the garment (${Math.round(grew * 100)}% of the clean area)`);
+    } else {
+      missed.push('isolation refused a garment on a plain sheet');
+    }
+    // brown on tan: the surface dimmed and a real garment look identical, so
+    // the shadow rule must stay narrow enough to leave this one alone.
+    const brownOnTan = mk((x) => {
+      x.fillStyle = '#c9a97e'; x.fillRect(0, 0, 200, 200);
+      x.fillStyle = '#6b4a30'; x.fillRect(55, 45, 90, 110);
+    });
+    if (isolateForLayout(brownOnTan)) {
+      const px = brownOnTan.getContext('2d').getImageData(0, 0, 200, 200).data;
+      if (px[(100 * 200 + 100) * 4 + 3] === 0) missed.push('a dark garment on a similar surface was eaten as shadow');
+    } else {
+      missed.push('isolation refused a brown piece on a tan sheet');
+    }
+
     const busy = mk((x) => {
       x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 200, 90);
       x.fillStyle = '#7d6a52'; x.fillRect(0, 90, 200, 110);

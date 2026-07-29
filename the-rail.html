@@ -1051,7 +1051,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.11';
+const APP_VERSION = '2026.08.12';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -4815,10 +4815,35 @@ function isolateForLayout(canvas){
      time, on every render, with no undo -- so it errs towards leaving a rim
      of backdrop rather than taking a bite out of the garment. */
   const tol2 = 30*30*3;
+  const bl = 0.299*mr + 0.587*mg + 0.114*mb;
+
+  /* A piece lying on a sheet casts a shadow onto it, and the shadow is not
+     the sheet's colour, so the plain test above stops at its edge and the
+     garment comes out with a dark blob welded to it -- measured at 23% of the
+     frame kept instead of 13%. Shading is the surface *dimmed*: same colour,
+     less light. So accept a pixel that is the border colour scaled down.
+
+     The band is deliberately narrow. Shadow and "a garment that happens to be
+     a darker version of the sheet" are the same pixels, and no rule can tell
+     them apart -- so this only claims subtle dimming, which is what a soft
+     shadow is, and leaves anything darker to be the garment. A brown piece on
+     a tan sheet is exactly the ambiguous case, and it is safer to keep a
+     shadow than to eat a jumper. */
+  const shaded = function(r, g, b){
+    const lum = 0.299*r + 0.587*g + 0.114*b;
+    if(lum >= bl - 3) return false;            /* not darker: the plain test has it */
+    const k = lum / (bl || 1);
+    if(k < 0.62) return false;                 /* too dark to be this surface, shaded */
+    const dr = r - mr*k, dg = g - mg*k, db = b - mb*k;
+    return (dr*dr + dg*dg + db*db) < 18*18*3;  /* same hue, just dimmed */
+  };
+
   const pale = function(idx){
     const p = idx*4;
-    const dr=d[p]-mr, dg=d[p+1]-mg, db=d[p+2]-mb;
-    return (dr*dr + dg*dg + db*db) < tol2;
+    const r = d[p], g = d[p+1], b = d[p+2];
+    const dr=r-mr, dg=g-mg, db=b-mb;
+    if((dr*dr + dg*dg + db*db) < tol2) return true;
+    return shaded(r, g, b);
   };
 
   const seen = new Uint8Array(w*h);
