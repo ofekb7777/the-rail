@@ -193,34 +193,76 @@ try {
     // Cutting a piece already in the wardrobe is what lets the lay-out read
     // as one: a photo still carrying its floor is a rectangle whatever it
     // sits next to. It has to work, and it has to be undoable.
-    const item = state.items.find((i) => i.category === 'top');
-    const before = item.image;
-    const res = await recutItem(item, true);
-    if (!res.ok) missed.push(`forced cut refused: ${res.reason}`);
-    else if (item.image === before) missed.push('the cut changed nothing');
-    else if (!item.imageOriginal) missed.push('the original photo was not kept');
-    if (item.imageOriginal) {
-      if (_layCache.has(item.id)) missed.push('the lay-out copy outlived the photo it came from');
-      await undoRecut(item);
-      if (item.image !== before) missed.push('undo did not restore the photo');
-      if (item.imageOriginal) missed.push('undo left the spare copy behind');
+    // The photo you took is the photo that is kept. Nothing in the app may
+    // write over it -- that was a one-way change to the only copy in
+    // existence, and on a busy background it mangled the piece. Checked by
+    // reading a corner of what processPhoto hands back: the backdrop it was
+    // shot on has a distinctive colour, and anything that cut the background
+    // would have painted that corner white.
+    const BACKDROP = [213, 207, 194];   // #d5cfc2
+    const shot = await (async () => {
+      const W = 400, c = document.createElement('canvas');
+      c.width = c.height = W;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = '#d5cfc2'; x.fillRect(0, 0, W, W);
+      const S = 440, layer = document.createElement('canvas');
+      layer.width = layer.height = S;
+      DEMO_SHAPES.top(layer.getContext('2d'), colorByName('navy').hex, S, S, {});
+      x.drawImage(layer, W * 0.2, W * 0.2, W * 0.6, W * 0.6);
+      return new Promise((r) => c.toBlob((b) => r(new File([b], 'p.png', { type: 'image/png' })), 'image/png'));
+    })();
+    const out = await processPhoto(shot);
+    if (out.originalUrl !== undefined || out.cutApplied !== undefined) {
+      missed.push('processPhoto still reports having edited the photo');
+    }
+    const back = await loadImageFromDataUrl(out.dataUrl);
+    const bc = document.createElement('canvas');
+    bc.width = back.naturalWidth; bc.height = back.naturalHeight;
+    bc.getContext('2d').drawImage(back, 0, 0);
+    const corner = bc.getContext('2d').getImageData(4, 4, 1, 1).data;
+    const drift = Math.max(
+      Math.abs(corner[0] - BACKDROP[0]),
+      Math.abs(corner[1] - BACKDROP[1]),
+      Math.abs(corner[2] - BACKDROP[2]));
+    if (drift > 12) {
+      missed.push(`the stored photo was altered - corner is rgb(${corner[0]},${corner[1]},${corner[2]}), shot on rgb(${BACKDROP})`);
     }
 
-    // The knockout is what makes a look read as a lay-out rather than a stack
-    // of rectangles -- and it must never eat a white garment, which is the
-    // failure it is most likely to have.
-    const white = document.createElement('canvas');
-    white.width = white.height = 200;
-    const wx = white.getContext('2d', { willReadFrequently: true });
-    wx.fillStyle = '#ffffff'; wx.fillRect(0, 0, 200, 200);
-    wx.fillStyle = '#ececea'; wx.fillRect(55, 45, 90, 110);   // a pale garment
-    if (!knockOutWhite(white)) missed.push('the knockout refused a plainly cut photo');
+    // Isolation happens at display time only. It has to lift a garment off a
+    // plain surface, and it has to refuse a cluttered one rather than guess.
+    const mk = (paint) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 200;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      paint(x);
+      return c;
+    };
+    const plain = mk((x) => {
+      x.fillStyle = '#d8d3c7'; x.fillRect(0, 0, 200, 200);      // a bedsheet
+      x.fillStyle = '#2f3d66'; x.fillRect(55, 45, 90, 110);     // the garment
+    });
+    if (!isolateForLayout(plain)) missed.push('isolation refused a plain backdrop');
     else {
-      const px = wx.getImageData(0, 0, 200, 200).data;
+      const px = plain.getContext('2d').getImageData(0, 0, 200, 200).data;
       const at = (x, y) => px[(y * 200 + x) * 4 + 3];
       if (at(5, 5) !== 0) missed.push('the backdrop was not made transparent');
-      if (at(100, 100) === 0) missed.push('the knockout ate a pale garment');
+      if (at(100, 100) === 0) missed.push('isolation ate the garment');
     }
+    const pale = mk((x) => {
+      x.fillStyle = '#ffffff'; x.fillRect(0, 0, 200, 200);      // a white sweep
+      x.fillStyle = '#ececea'; x.fillRect(55, 45, 90, 110);     // a white shirt
+    });
+    if (isolateForLayout(pale)) {
+      const px = pale.getContext('2d').getImageData(0, 0, 200, 200).data;
+      if (px[(100 * 200 + 100) * 4 + 3] === 0) missed.push('isolation ate a white garment');
+    }
+    const busy = mk((x) => {
+      x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 200, 90);
+      x.fillStyle = '#7d6a52'; x.fillRect(0, 90, 200, 110);
+      x.fillStyle = '#2a2a30'; x.fillRect(0, 0, 40, 200);
+      x.fillStyle = '#8f5f4a'; x.fillRect(150, 140, 50, 60);
+    });
+    if (isolateForLayout(busy)) missed.push('isolation touched a cluttered photo instead of leaving it alone');
     return missed;
   });
   for (const m of layMisses) failures.push(`laid out: ${m}`);
