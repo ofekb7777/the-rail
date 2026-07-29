@@ -190,6 +190,23 @@ try {
     if (!rows.some((r) => r.length === 2)) missed.push('outerwear and top did not share a row');
     if (!fl.querySelector('.fl-item[data-swap]')) missed.push('no piece was swappable from the lay-out');
 
+    // Pieces sit at a slight angle so the lay-out reads as cloth on a bed
+    // rather than a grid. The angle comes from the piece's own id: a look that
+    // tilted differently every time it was drawn would be worse than one that
+    // never tilted, so stability matters more here than the angle itself.
+    const poses = () => [...fl.querySelectorAll('.fl-item')].map((e) => e.style.transform);
+    const before2 = poses();
+    if (!before2.length || before2.some((t) => !/rotate\(-?\d/.test(t))) {
+      missed.push('pieces are not being angled');
+    }
+    if (new Set(before2).size < 2) missed.push('every piece was given the same pose');
+    render();
+    await new Promise((r) => setTimeout(r, 150));
+    const after2 = [...document.querySelectorAll('.flatlay .fl-item')].map((e) => e.style.transform);
+    if (JSON.stringify(before2) !== JSON.stringify(after2)) {
+      missed.push('the angles changed on a re-render - they must be stable per piece');
+    }
+
     // Cutting a piece already in the wardrobe is what lets the lay-out read
     // as one: a photo still carrying its floor is a rectangle whatever it
     // sits next to. It has to work, and it has to be undoable.

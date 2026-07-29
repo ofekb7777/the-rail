@@ -261,6 +261,14 @@ can be strict:
   on every render, so it errs towards leaving a rim of backdrop rather than
   taking a bite out of the garment.
 
+Pieces sit at a slight angle rather than square, two on a row lean away from
+each other and overlap, and each is nudged a little off centre — because nobody
+lays clothes out on a grid, and everything dead straight is the tell that a
+machine arranged it. The angle comes from the piece's own id, not a random
+number: a look that tilted differently every time you opened it would be far
+worse than one that never tilted at all, so a given garment sits the same way
+every time you see it.
+
 Every isolated piece is then given a **white outline**, the way a sticker is cut
 with a border. It is not decoration: it is what buys the isolation room to be
 imprecise. A flood fill stops in a slightly different place all the way round a
