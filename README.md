@@ -132,8 +132,9 @@ app can *read* it, not what gets stored.
    near-black rug reads as charcoal; a white shirt on white paper cannot be told
    from the paper, so the lay-out shows the photograph rather than a hole.
 5. **Fill roughly half the frame.** Under about 1% of the frame is treated as
-   clutter, and a fill that clears almost everything has eaten the garment too,
-   so both ends are refused.
+   clutter. A small piece is fine — a shoe covering a few percent isolates
+   correctly — but the further away you stand, the more of the room ends up
+   touching the frame edge, and that is what actually breaks it.
 6. **Even, indirect light.** Pixels brighter than 250 or darker than 26 carry
    no usable hue and are discarded, so no flash and no hard sun.
 7. **Warm bulbs are corrected up to a point.** The illuminant estimate is only
@@ -240,6 +241,13 @@ can be strict:
 - **A fill that takes almost the whole frame is refused** — it has clearly eaten
   the garment along with the surface. This is what saves a white shirt on a
   white sweep: the app shows the photo rather than a hole where the shirt was.
+- **A piece may be small.** The test is not how much of the frame the fill
+  took but whether one coherent island survives it — at least 1.2% of the
+  frame, the same floor the cut-out uses to decide a subject exists. Judging by
+  how much went instead refused footwear at any sensible framing: a shoe
+  covering 3.2% of its frame was rejected while a coat at 19.7% went through,
+  and eating a garment leaves scattered fragments where a small garment leaves
+  one shape.
 - **A cast shadow is treated as backdrop.** A piece lying on a sheet shades it,
   and the shadow is not the sheet's colour — so without this the garment comes
   out with a dark blob welded to it, measured at 23% of the frame kept instead
@@ -253,9 +261,19 @@ can be strict:
   on every render, so it errs towards leaving a rim of backdrop rather than
   taking a bite out of the garment.
 
-A piece that could not be lifted is framed as a photograph — rounded, softly
-shadowed — rather than left as a bare square, so it reads as a picture of the
-thing on a table rather than a cut-out that went wrong.
+Every isolated piece is then given a **white outline**, the way a sticker is cut
+with a border. It is not decoration: it is what buys the isolation room to be
+imprecise. A flood fill stops in a slightly different place all the way round a
+garment, and against a flat backdrop that raggedness is what the eye catches.
+Under a uniform ring, a wobble of a pixel or two stops being visible — the edge
+you see is the ring's, and that one is smooth by construction. What it cannot do
+is hide a mistake bigger than itself: a corner of floor left attached gets
+outlined too, which draws the eye rather than away, so the refusals above stay
+exactly as strict.
+
+A piece that could not be lifted at all is framed as a photograph — rounded,
+softly shadowed — rather than left as a bare square, so it reads as a picture of
+the thing on a table rather than a cut-out that went wrong.
 
 The transparent copy is cached for the session and never written to storage: it
 is a way of *showing* the photo, not an edit to it.

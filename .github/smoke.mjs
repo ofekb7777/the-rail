@@ -299,6 +299,20 @@ try {
       missed.push('isolation refused a brown piece on a tan sheet');
     }
 
+    // Footwear is small in its frame by nature. An earlier guard refused any
+    // fill that took more than 93% of the frame on the grounds that it must
+    // have eaten the garment -- which is also true of a shoe, so shoes were
+    // refused outright while coats sailed through.
+    const smallPiece = mk((x) => {
+      x.fillStyle = '#d5cfc2'; x.fillRect(0, 0, 200, 200);
+      x.fillStyle = '#5c1f2e'; x.fillRect(78, 92, 46, 22);   // ~2.5% of the frame
+    });
+    if (!isolateForLayout(smallPiece)) {
+      missed.push('a small piece was refused - the shoe case');
+    } else if (smallPiece.getContext('2d').getImageData(0, 0, 200, 200).data[(100 * 200 + 100) * 4 + 3] === 0) {
+      missed.push('a small piece was isolated away to nothing');
+    }
+
     const busy = mk((x) => {
       x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 200, 90);
       x.fillStyle = '#7d6a52'; x.fillRect(0, 90, 200, 110);
