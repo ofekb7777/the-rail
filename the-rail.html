@@ -1051,7 +1051,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.12';
+const APP_VERSION = '2026.08.13';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -4862,12 +4862,24 @@ function isolateForLayout(canvas){
     if(y>0)   stack.push(idx-w);
     if(y<h-1) stack.push(idx+w);
   }
-  /* Nothing pale reaches the border: this photo still has its background, and
-     pretending otherwise would only punch holes in it. At the other end, a
-     fill that has taken almost the whole frame has eaten the garment along
-     with the paper -- a pale piece on a paler sweep -- and showing nothing at
-     all is worse than showing the photo as it is. */
-  if(cleared < w*h*0.04 || cleared > w*h*0.93) return false;
+  /* Nothing reaching the border matched: this photo still has its background,
+     and pretending otherwise would only punch holes in it. */
+  if(cleared < w*h*0.04) return false;
+
+  /* The other end used to be "the fill took more than 93% of the frame, so it
+     must have eaten the garment". That is true of a pale piece on a paler
+     sweep -- and equally true of a shoe, which is simply small. It refused
+     footwear at any sensible framing: a shoe covering 3.2% of its frame was
+     rejected outright while a coat at 19.7% sailed through, and footwear is
+     exactly the thing people photograph from standing height.
+
+     What actually separates the two is not how much went but what is left.
+     Eating the garment leaves scattered fragments of its own shading; a small
+     garment leaves one coherent island. So ask for the island -- the same test,
+     and the same 1.2% floor, that the cut-out already uses to decide a subject
+     exists at all. */
+  const blob = largestSurvivor(seen, w, h);
+  if(blob.area < w*h*0.012) return false;
 
   /* Where the garment meets the white, the photo has a ramp of part-garment
      part-paper pixels. They sit below the threshold, so the fill stops short
@@ -4906,6 +4918,49 @@ function isolateForLayout(canvas){
   return true;
 }
 
+/* ---------- the sticker outline ----------
+   A ring of white traced around the isolated piece, the way a sticker is cut
+   with a border. It is not decoration: it is what buys the isolation room to
+   be imprecise. A flood fill stops at a slightly different place all the way
+   round a garment, and against a flat paper backdrop that raggedness is the
+   thing the eye catches. Under a uniform ring, a wobble of a pixel or two
+   stops being visible at all -- the edge you see is the ring's edge, and that
+   one is perfectly smooth by construction.
+
+   Drawn by stamping a white silhouette at points around a circle and putting
+   the garment back on top. Cheap enough at once per piece, and unlike a blur
+   it gives a hard, even edge rather than a glow.
+
+   What it cannot do is hide a mistake bigger than itself. A corner of floor
+   left attached gets outlined along with the garment, which draws the eye to
+   it rather than away; so the refusals stay exactly as strict as they were. */
+const LAY_OUTLINE = 5;      /* px at the 420 the copy is built at */
+
+function addStickerOutline(canvas, px){
+  const w = canvas.width, h = canvas.height;
+  const pad = Math.ceil(px) + 2;
+  const out = document.createElement('canvas');
+  out.width = w + pad*2; out.height = h + pad*2;
+  const octx = out.getContext('2d');
+
+  /* the piece as a solid white shape */
+  const sil = document.createElement('canvas');
+  sil.width = w; sil.height = h;
+  const sctx = sil.getContext('2d');
+  sctx.drawImage(canvas, 0, 0);
+  sctx.globalCompositeOperation = 'source-in';
+  sctx.fillStyle = '#ffffff';
+  sctx.fillRect(0, 0, w, h);
+
+  const steps = 24;
+  for(let i=0; i<steps; i++){
+    const a = (i/steps) * Math.PI * 2;
+    octx.drawImage(sil, pad + Math.cos(a)*px, pad + Math.sin(a)*px);
+  }
+  octx.drawImage(canvas, pad, pad);
+  return out;
+}
+
 /* Swaps in the transparent copy once it is ready. Synchronous render puts the
    ordinary photo up first, so the lay-out is never blank while this runs. */
 async function enhanceLayImages(){
@@ -4927,7 +4982,9 @@ async function enhanceLayImages(){
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
-      const url = isolateForLayout(c) ? c.toDataURL('image/png') : null;
+      const url = isolateForLayout(c)
+        ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png')
+        : null;
       _layCache.set(id, url);
       settle(url);
     }catch(e){
