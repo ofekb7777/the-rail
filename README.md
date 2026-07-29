@@ -6,8 +6,9 @@ choose *Add to Home Screen* for a fullscreen app that works offline.
 A wardrobe app that photographs your clothes, learns what goes together, and
 tells you what to wear. One HTML file. No accounts, no server, no API keys.
 
-Everything — the styling engine, the colour science, the background removal —
-runs in your browser. Nothing about your wardrobe ever leaves your device.
+Everything — the styling engine, the colour science, the background isolation —
+runs in your browser. Nothing about your wardrobe ever leaves your device, and
+the photos you take are stored exactly as you took them.
 
 ---
 
@@ -113,12 +114,14 @@ asks a weather service about behind your back.
 
 ## Photographing a piece
 
-The colour reader and the background cut-out both work off the same thing: the
-outer edge of the photo. Every rule below is one the code actually applies.
+The colour reader and the lay-out's background isolation both work off the same
+thing: the outer edge of the photo. Every rule below is one the code actually
+applies. Note that your photo is never altered — these rules decide how well the
+app can *read* it, not what gets stored.
 
 1. **Put the piece down on one plain surface.** The app samples the frame's
-   border to find the backdrop, and refuses to cut when that border is too
-   varied — above a variance of 46. A plain wall measures near 0; a shoe held
+   border to find the backdrop, and gives up on separating the piece when that
+   border is too varied — above a variance of 46. A plain wall measures near 0; a shoe held
    up in a room, with a desk, a floor and a monitor all touching the edges,
    measures about 150. Paper, a door or a bedsheet is enough.
 2. **Leave a clear margin.** Nothing but that surface should touch the frame
@@ -126,11 +129,11 @@ outer edge of the photo. Every rule below is one the code actually applies.
 3. **Don't hold it.** A hand becomes part of the subject and skin skews the
    colour.
 4. **Contrast with the surface.** Dark on pale, pale on dark. Black on a
-   near-black rug reads as charcoal; a white shirt on white paper is consumed
-   by the fill and the cut is refused.
+   near-black rug reads as charcoal; a white shirt on white paper cannot be told
+   from the paper, so the lay-out shows the photograph rather than a hole.
 5. **Fill roughly half the frame.** Under about 1% of the frame is treated as
-   clutter; if the fill cannot clear at least 10% of the frame there is no
-   background to remove.
+   clutter, and a fill that clears almost everything has eaten the garment too,
+   so both ends are refused.
 6. **Even, indirect light.** Pixels brighter than 250 or darker than 26 carry
    no usable hue and are discarded, so no flash and no hard sun.
 7. **Warm bulbs are corrected up to a point.** The illuminant estimate is only
@@ -152,9 +155,9 @@ neutrals: black and white against cluttered edges, and white under a warm bulb,
 which is the documented limit of the illuminant estimate. If the reading is not
 what you see, the four next-best candidates are offered as dots beside it.
 
-Note that colour survives a *refused* cut-out. The two are independent: the app
-can decline to remove a background and still name the garment correctly, down to
-about a third of a percent of the frame.
+Note that colour survives a background the app cannot separate. The two are
+independent: it can decline to isolate a piece for the lay-out and still name
+its colour correctly, down to about a third of a percent of the frame.
 
 **The category is guessed only when the silhouette is unmistakable**, and
 otherwise it asks. Measured off the app's own garment renders, height against
@@ -218,38 +221,44 @@ collage look wrong. Pieces stay tappable: anything with ⇄ has alternatives.
 
 ### Why the backgrounds disappear
 
-A lay-out only reads as one if the garments are separated from whatever they
-were photographed on. Two things make that happen.
+**Your photo is never edited.** It is stored exactly as taken, and nothing in
+the app writes over it. An earlier version cut the background into the stored
+photo at import; that was a one-way change to the only copy in existence, and
+on a cluttered photo it mangled the piece rather than freeing it. If your
+wardrobe still holds a photo from that version, it is restored to the original
+the next time the app opens.
 
-**The stored photo.** The cut-out at import paints the background white. If you
-skipped it, or it declined, *Cut out the background* on the piece's own detail
-sheet does it after the fact — and offers to put it back, since the photo it
-edits is the only copy you have. When the cut declines because the background
-is too cluttered, the button offers to overrule it, exactly as the import does.
+Isolation happens **at display time, in the lay-out only**. Each photo gets a
+copy with real transparency, built by measuring the frame's border to find what
+the piece was photographed on, then flood-filling inward from the edge. Being
+wrong there costs a plain-looking tile and nothing else, which is why the rules
+can be strict:
 
-**The knockout at display time.** White on paper is still a white rectangle, so
-the lay-out builds a copy of each photo with real transparency. The rule is not
-*"white pixels go"* — that hollows out a white shirt. It is the same rule the
-cut-out uses: flood inward from the border and take only the pale pixels
-actually **connected to the edge**. A white shirt's middle is not connected to
-the border, because the shirt is in the way, so it survives; a photo that was
-never cut has a room at its border rather than white, so nothing is taken and it
-is shown exactly as it is. The threshold sits at 246 rather than 228 for that
-reason — at 228 it ate the middle out of a white shirt, and losing a garment is
-much worse than leaving an edge on a photo you never cut. If the fill ends up
-taking almost the whole frame it is refused outright, on the grounds that it has
-clearly eaten the garment too.
+- **A cluttered border is refused outright** — above a variance of 46, the same
+  bar the colour reader uses. Your floor with a desk and a rug in shot is left
+  as a photograph.
+- **A fill that takes almost the whole frame is refused** — it has clearly eaten
+  the garment along with the surface. This is what saves a white shirt on a
+  white sweep: the app shows the photo rather than a hole where the shirt was.
+- **The tolerance is tighter than the old cut-out's**, because that one could be
+  compared against an original and undone. This one has to be right first time,
+  on every render, so it errs towards leaving a rim of backdrop rather than
+  taking a bite out of the garment.
 
-Blending the photo with `mix-blend-mode: multiply` was tried first and is not
-enough: photos are stored as JPEG, JPEG keeps no pure white, and the near-white
-that comes back multiplies into a faint rectangle around every piece.
+A piece that could not be lifted is framed as a photograph — rounded, softly
+shadowed — rather than left as a bare square, so it reads as a picture of the
+thing on a table rather than a cut-out that went wrong.
 
-The copy is cached for the session and never written to storage — it is a way of
-*showing* the photo, not an edit to it.
+The transparent copy is cached for the session and never written to storage: it
+is a way of *showing* the photo, not an edit to it.
 
-A piece photographed against a genuinely busy background cannot be isolated by
-any of this, and will still read as a rectangle. The fix for that one is the
-camera: see **Photographing a piece** above.
+Blending with `mix-blend-mode: multiply` was tried first and is not enough:
+photos are JPEG, JPEG keeps no pure white, and the near-white that comes back
+multiplies into a faint rectangle around every piece.
+
+So the lay-out looks best on pieces photographed against one plain surface —
+see **Photographing a piece** above. That is the same advice the colour reader
+wants, for the same reason: both work off the outer edge of the frame.
 
 ## The back gesture
 

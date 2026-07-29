@@ -37,7 +37,7 @@
   /* Nothing you press should be selectable. Holding a control long enough
      to feel it respond otherwise raises a text selection, which reads as a
      bug in an app that is meant to feel like an object. */
-  button, .chip, .tag-card, .combo-row, .swap-card, .switch, .deck-dots span, .sheet-handle{
+  button, .chip, .tag-card, .swap-card, .switch, .deck-dots span, .sheet-handle{
     -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
   }
 
@@ -472,11 +472,18 @@
      thing this view exists to avoid.
 
      The background is knocked out to real transparency in script rather than
-     blended away in CSS -- see knockOutWhite. multiply was tried first and
+     blended away in CSS -- see isolateForLayout. multiply was tried first and
      leaves a faint rectangle around every piece, because the stored photo is
      JPEG and JPEG has no pure white to blend into the paper. */
   .fl-item img{
     width:100%; height:auto; display:block; object-fit:contain;
+  }
+  /* Could not be lifted off its background -- see enhanceLayImages. Framed
+     rather than left as a bare square, so it reads as a photograph of the
+     piece rather than a cut-out that failed. */
+  .fl-item img.fl-photo{
+    border-radius:10px;
+    box-shadow:0 3px 10px -3px rgba(27,33,48,0.35);
   }
   /* The reference this is modelled on puts nothing at all on the garments,
      and every badge added here is a thing that is not clothing. So it is as
@@ -499,20 +506,6 @@
 
 
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
-  .combo-row{
-    display:flex; gap:11px; align-items:center; padding:10px; margin-bottom:7px;
-    background:rgba(255,255,255,0.04); border:1px solid var(--line); border-radius:10px;
-    cursor:pointer; transition:background .15s;
-  }
-  .combo-row:active{background:rgba(255,255,255,0.09);}
-  .combo-imgs{display:flex; gap:3px; flex:none;}
-  .combo-imgs img{width:34px;height:34px;object-fit:cover;border-radius:5px;background:#fff;}
-  .combo-imgs img.is-anchor{outline:2px solid var(--mustard); outline-offset:-1px;}
-  .combo-meta{flex:1; min-width:0;}
-  .combo-rule{font-size:12px; font-weight:700; color:var(--sage); letter-spacing:0.2px;}
-  .combo-names{font-size:11px; color:rgba(239,232,216,0.55); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .combo-hint{font-size:10.5px; color:rgba(239,232,216,0.35); text-align:center; margin-top:6px;}
-
   @keyframes spin{to{transform:rotate(360deg);}}
   .sw-lg{width:26px;height:17px;border-radius:3px; display:block; border:1px solid rgba(0,0,0,0.25);}
 
@@ -624,7 +617,6 @@
      so it is the one thing outlined. */
   .batch-cat.needs{box-shadow:inset 0 0 0 1px var(--wine); background:rgba(143,46,57,0.18);}
   .batch-colors{display:flex; gap:3px; flex-wrap:wrap;}
-  .batch-cut.retry{background:rgba(255,255,255,0.14); color:var(--bone);}
   .batch-guess.dim{color:rgba(239,232,216,0.38); line-height:1.35;}
   .batch-color-dot{width:13px;height:13px;border-radius:3px;cursor:pointer;opacity:0.5;transition:opacity .15s,transform .15s;}
   .batch-color-dot.sel{opacity:1; transform:scale(1.2); border:1px solid var(--bone);}
@@ -632,13 +624,6 @@
     font-size:9px; letter-spacing:0.3px; color:var(--sage); font-weight:700;
     display:flex; align-items:center; gap:4px;
   }
-  .batch-cut{
-    position:absolute; top:4px; right:4px; z-index:10;
-    background:rgba(27,33,48,0.8); color:var(--bone); border:none;
-    font-size:9px; font-weight:800; letter-spacing:0.3px;
-    padding:3px 6px; border-radius:8px; cursor:pointer;
-  }
-  .batch-cut.on{background:var(--sage); color:#101610;}
 
   .upload-hint{font-size:12px; color:rgba(239,232,216,0.5);}
   .shot-card{
@@ -947,14 +932,6 @@
           <div class="cap-icon">🖼️</div><div>Choose photos</div>
         </label>
       </div>
-      <div class="gap-toggle-row" style="border-top:1px solid var(--line);">
-        <div class="t-txt">
-          <div class="t-name">Cut out the background</div>
-          <div class="t-sub">Drops plain backgrounds so pieces sit on white like a catalogue. Skipped automatically on busy photos.</div>
-        </div>
-        <button class="switch on" id="toggleCutout"></button>
-      </div>
-
       <!-- Every line here is a rule the code actually applies, in the order
            it applies them. Written down because a shoe held up in a room
            fails the first one, and nothing on screen used to say so. -->
@@ -1074,7 +1051,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.10';
+const APP_VERSION = '2026.08.11';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1397,7 +1374,6 @@ let state = {
   update: {status:'unknown', latest:null, checkedAt:0},   /* 'current' | 'stale' | 'offline' | 'unknown' */
   showGaps: false,
   gapResult: null,
-  cutout: true,
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1492,7 +1468,6 @@ async function loadAll(){
   state.wearLog = await readJson('wardrobe:wearlog', []);
   state.plans   = await readJson('wardrobe:plans', {});
   const prefs   = await readJson('wardrobe:prefs', {});
-  if(typeof prefs.cutout === 'boolean') state.cutout = prefs.cutout;
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
@@ -1502,6 +1477,17 @@ async function loadAll(){
   state.items.forEach(function(i){
     if(i.warmth == null || i.formality == null){ enrichItem(i); migrated = true; }
     if(i.createdAt == null){ i.createdAt = Date.now(); migrated = true; }
+    /* An earlier version could paint over the stored photo, and on a busy
+       background it did that badly -- blotches of white where a floor had
+       been. It kept the original alongside so the change could be undone, and
+       now that nothing edits a photo any more this is the last chance to undo
+       it. Anything still holding an original gets it back, and the spare copy
+       is dropped so the wardrobe stops carrying two of everything. */
+    if(i.imageOriginal){
+      i.image = i.imageOriginal;
+      delete i.imageOriginal;
+      migrated = true;
+    }
   });
   if(migrated) saveItems();
 
@@ -1523,7 +1509,7 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    cutout: state.cutout, temp: state.temp, reorderHintSeen: state.reorderHintSeen
+    temp: state.temp, reorderHintSeen: state.reorderHintSeen
   });
 }
 
@@ -1536,7 +1522,7 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     items: state.items, outfits: state.outfits,
     wearLog: state.wearLog, plans: state.plans,
-    prefs: {cutout: state.cutout, temp: state.temp}
+    prefs: {temp: state.temp}
   };
   try{
     const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
@@ -1579,7 +1565,6 @@ async function importBackup(file, mode){
       if(!state.plans[d]) state.plans[d] = data.plans[d];
     });
   }
-  if(data.prefs && typeof data.prefs.cutout === 'boolean') state.cutout = data.prefs.cutout;
   if(data.prefs && data.prefs.temp) state.temp = tempBand(data.prefs.temp).v;
   state.items.forEach(enrichItem);
   await saveItems(); await saveOutfits(); await saveWearLog(); await savePlans(); await savePrefs();
@@ -2162,27 +2147,29 @@ function canvasToJpeg(canvas, quality){
 }
 
 /* Full pipeline for one photo. Returns everything the review card needs. */
-async function processPhoto(file, doCutout, force){
+async function processPhoto(file){
   const img = await loadImageFromFile(file);
 
-  /* analyse at a decent size — fine detail matters for colour clustering */
+  /* analyse at a decent size -- fine detail matters for colour clustering */
   const work = drawToCanvas(img, 420);
 
-  /* Read the light before anything touches the pixels: the cut-out paints the
-     backdrop white, and the backdrop is exactly the evidence we need. */
   let gains = null;
   try{ gains = estimateIlluminant(work); }
   catch(e){ console.warn('white balance failed', e); }
 
-  let cut = {applied:false, reason:'off'};
-  if(doCutout){
-    try{ cut = cutOutBackground(work, {force:force}); }
-    catch(e){ console.warn('cutout failed', e); cut = {applied:false, reason:'error'}; }
-  }
+  /* The cut-out still runs, but only ever on a scratch canvas, and only for
+     what it can tell us: which pixels are backdrop, and what shape the thing
+     is. Nothing it produces is stored. The photo you took is the photo that
+     is kept -- editing it was a one-way change to the only copy in existence,
+     and a flood fill across a cluttered room mangles a piece rather than
+     freeing it. The lay-out does its own isolation at display time instead,
+     where being wrong costs nothing but a plain-looking picture. */
+  let cut = {applied:false};
+  try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
+  catch(e){ console.warn('backdrop read failed', e); }
 
-  /* Colour is judged on a white-balanced copy, never on the stored photo --
-     the picture should still look like the room it was taken in. The mask lines
-     up because both canvases come from the same image at the same size. */
+  /* Colour is judged on a white-balanced copy. The mask lines up because both
+     canvases come from the same image at the same size. */
   let measure = work;
   if(gains){
     measure = drawToCanvas(img, 420);
@@ -2190,40 +2177,11 @@ async function processPhoto(file, doCutout, force){
   }
   const colors = detectColors(measure, cut.applied ? cut.mask : null);
 
-  /* The silhouette is worth measuring even when you have the cut-out switched
-     off: wanting to keep the background is not a statement about what the
-     thing is. cutOutBackground paints the canvas it is handed, so that case
-     gets a throwaway copy. A cut that was *declined* is not retried -- it
-     would decline again for the same reason. */
-  let shape = cut.applied ? cut.shape : null;
-  if(!doCutout){
-    try{
-      const probe = cutOutBackground(drawToCanvas(img, 420), {force:force});
-      if(probe.applied) shape = probe.shape;
-    }catch(e){ /* shape is a nicety; never let it cost you the photo */ }
-  }
-
-  /* store at 520px — plenty for a phone screen, kind to the storage quota */
-  const store = drawToCanvas(img, 520);
-  let cutStore = {applied:false};
-  if(doCutout && cut.applied){
-    try{ cutStore = cutOutBackground(store, {force:force}); }catch(e){}
-  }
-  const dataUrl = canvasToJpeg(store, 0.76);
-
-  /* keep the untouched original too, so the cut-out stays undoable */
-  let originalUrl = dataUrl;
-  if(cutStore.applied){
-    originalUrl = canvasToJpeg(drawToCanvas(img, 520), 0.76);
-  }
-
+  const dataUrl = canvasToJpeg(drawToCanvas(img, 520), 0.76);
   return {
     dataUrl: dataUrl,
-    originalUrl: originalUrl,
-    cutApplied: cutStore.applied,
-    cutReason: cutStore.applied ? null : (cut.reason || null),
     colors: colors,
-    category: guessCategoryFromShape(shape)   /* null when the shape is not telling */
+    category: guessCategoryFromShape(cut.applied ? cut.shape : null)
   };
 }
 
@@ -2956,16 +2914,6 @@ function swapCandidates(item, currentIds){
 }
 
 /* ---------- "wear it with" on the detail sheet ---------- */
-function buildLocalOutfits(anchorId, max){
-  const looks = generateLooks({anchorId:anchorId, count:max||3});
-  return looks.map(function(l){
-    return {
-      items: l.itemIds.map(function(id){ return state.items.find(function(i){ return i.id===id; }); }).filter(Boolean),
-      rule: l.harmonyRule,
-      percent: l.percent
-    };
-  }).filter(function(c){ return c.items.length >= 2; });
-}
 
 /* ============================================================
    WHAT AM I MISSING?
@@ -4577,23 +4525,6 @@ function openDetail(id){
   const c = colorByName(item.color);
   const n = wearCount(id);
 
-  const combos = buildLocalOutfits(id, 3);
-  const harmonyHtml = combos.length
-    ? '<div style="margin-bottom:16px;">'
-      + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(239,232,216,0.5);font-weight:600;margin-bottom:9px;">Wear it with</div>'
-      + combos.map(function(cb){
-          return '<div class="combo-row" data-combo="'+cb.items.map(function(i){return i.id;}).join(',')+'">'
-            + '<div class="combo-imgs">'+cb.items.map(function(i){
-                return '<img src="'+imgSrc(i)+'"'+(i.id===id?' class="is-anchor"':'')+' alt="">';
-              }).join('')+'</div>'
-            + '<div class="combo-meta"><div class="combo-rule">'+cb.rule+' · '+cb.percent+'%</div>'
-            + '<div class="combo-names">'+cb.items.filter(function(i){return i.id!==id;})
-                .map(function(i){ return escapeHtml(i.name); }).join(' · ')+'</div></div>'
-            + '</div>';
-        }).join('')
-      + '<div class="combo-hint">Tap a combo to log it as today\'s outfit</div></div>'
-    : '';
-
   const metaLine = [
     daysAgoLabel(lastWorn(id)),
     n ? 'worn '+n+'×' : null
@@ -4613,14 +4544,7 @@ function openDetail(id){
     +   '</div>'
     +   '<button id="favBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:'+(item.favourite?'var(--thread)':'rgba(239,232,216,0.3)')+';padding:2px;">♥</button>'
     + '</div>'
-    + harmonyHtml
     + '<button class="btn-primary" id="buildAroundBtn">Build an outfit around this</button>'
-    /* Offered on every piece rather than only on ones that look uncut: the
-       app does not record whether a stored photo was cut, so deciding which
-       pieces "need" this would be a guess. Undo makes offering it safe. */
-    + (item.imageOriginal
-        ? '<button class="btn-secondary" id="undoCutBtn">Put the background back</button>'
-        : '<button class="btn-secondary" id="cutItemBtn">Cut out the background</button>')
     + '<button class="btn-secondary" id="woreItemBtn">I\'m wearing this today</button>'
     + '<button class="btn-secondary" id="editItemBtn">Edit details</button>'
     + '<div id="editPanel" style="display:none; margin-top:12px;">'
@@ -4644,19 +4568,6 @@ function openDetail(id){
 
   detailOverlay.classList.add('open');
 
-  document.querySelectorAll('.combo-row').forEach(function(row){
-    row.onclick = function(){
-      const ids = row.dataset.combo.split(',').filter(Boolean);
-      const names = ids.map(function(i){
-        const it = state.items.find(function(x){ return x.id===i; }); return it?it.name:null;
-      }).filter(Boolean);
-      logWear(ids, names.slice(0,2).join(' + '));
-      detailOverlay.classList.remove('open');
-      render();
-      toast('Logged for today');
-    };
-  });
-
   document.getElementById('favBtn').onclick = async function(){
     item.favourite = !item.favourite;
     await saveItems();
@@ -4670,38 +4581,6 @@ function openDetail(id){
     render();
   };
 
-  const cutBtn = document.getElementById('cutItemBtn');
-  if(cutBtn) cutBtn.onclick = async function(){
-    const btn = this;
-    btn.disabled = true; btn.textContent = 'Cutting…';
-    let res;
-    try{ res = await recutItem(item, false); }
-    catch(e){ console.error('recut failed', e); res = {ok:false, reason:'error'}; }
-
-    if(res.ok){ openDetail(id); render(); toast('Background removed'); return; }
-
-    /* A refusal is a judgement, and the same judgement can be overruled here
-       as at import -- so say why it declined and offer the override rather
-       than leaving a dead button. */
-    btn.disabled = false;
-    btn.textContent = 'Cut it out anyway';
-    toast(cutReasonText(res.reason));
-    btn.onclick = async function(){
-      btn.disabled = true; btn.textContent = 'Cutting…';
-      let forced;
-      try{ forced = await recutItem(item, true); }
-      catch(e){ console.error('forced recut failed', e); forced = {ok:false, reason:'error'}; }
-      if(forced.ok){ openDetail(id); render(); toast('Background removed'); }
-      else{ btn.disabled = false; btn.textContent = 'Cut out the background'; toast('Could not cut this photo'); }
-    };
-  };
-
-  const undoCut = document.getElementById('undoCutBtn');
-  if(undoCut) undoCut.onclick = async function(){
-    this.disabled = true;
-    if(await undoRecut(item)){ openDetail(id); render(); toast('Background restored'); }
-    else this.disabled = false;
-  };
   document.getElementById('woreItemBtn').onclick = function(){
     logWear([id], item.name);
     detailOverlay.classList.remove('open');
@@ -4796,7 +4675,7 @@ function openAnchorPicker(){
    ============================================================ */
 const addOverlay = document.getElementById('addOverlay');
 
-let batchQueue = [];   /* [{dataUrl, originalUrl, cutApplied, colors, name, category, color, selected}] */
+let batchQueue = [];   /* [{dataUrl, colors, name, category, color, selected}] */
 
 function resetDraft(){
   batchQueue = [];
@@ -4804,7 +4683,6 @@ function resetDraft(){
   document.getElementById('batchReview').style.display = 'none';
   const bq = document.getElementById('batchQueue'); if(bq) bq.innerHTML = '';
   const bp = document.getElementById('batchProgress'); if(bp) bp.innerHTML = '';
-  const tc = document.getElementById('toggleCutout'); if(tc) tc.classList.toggle('on', !!state.cutout);
 }
 
 document.getElementById('addBtn').onclick = function(){ resetDraft(); addOverlay.classList.add('open'); };
@@ -4812,11 +4690,6 @@ document.getElementById('cancelAddBtn').onclick = function(){
   resetDraft();
   addOverlay.classList.remove('open');
   render();
-};
-document.getElementById('toggleCutout').onclick = function(e){
-  state.cutout = !state.cutout;
-  e.currentTarget.classList.toggle('on', state.cutout);
-  savePrefs();
 };
 
 async function handleIncomingFiles(fileList){
@@ -4835,14 +4708,10 @@ async function handleIncomingFiles(fileList){
   for(let n=0; n<files.length; n++){
     const slot = startAt + n;
     try{
-      const res = await processPhoto(files[n], state.cutout, false);
+      const res = await processPhoto(files[n]);
       const top = res.colors && res.colors.length ? res.colors[0].name : 'grey';
       batchQueue[slot] = {
         dataUrl: res.dataUrl,
-        originalUrl: res.originalUrl,
-        cutApplied: res.cutApplied,
-        cutAvailable: res.cutApplied,
-        cutReason: res.cutReason,
         file: files[n],
         colors: res.colors || [],
         name: '',
@@ -4912,23 +4781,44 @@ function renderBatchQueue(){
    edit to it. */
 const _layCache = new Map();
 
-function knockOutWhite(canvas){
+function isolateForLayout(canvas){
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const img = ctx.getImageData(0,0,w,h);
   const d = img.data;
 
-  /* Tight on purpose. The backdrop this is looking for was *painted* pure
-     white by the cut-out, and only JPEG ringing moves it off 255 -- whereas a
-     white garment is lit, folded and shaded, and sits in the 230s. A looser
-     rule was tried at 228 and ate the middle out of a white shirt, which is
-     the one failure worth designing against here: losing a garment is much
-     worse than leaving a faint edge on a photo that was never cut. */
+  /* Photos are kept exactly as taken now, so the backdrop to look for is
+     whatever the piece was actually photographed on -- a bedsheet, a door,
+     a desk -- not the white a cut-out used to paint. So measure it from the
+     frame's border rather than assuming a colour, the same way the cut-out
+     does, and refuse outright when that border is too varied to be one
+     surface. On a cluttered photo this leaves the picture alone, which is
+     the whole point: being wrong here should cost a plain-looking tile, not
+     a mangled garment. */
+  const step = Math.max(1, Math.floor(Math.min(w,h)/60));
+  const border = [];
+  for(let x=0; x<w; x+=step){ border.push(x*4); border.push(((h-1)*w+x)*4); }
+  for(let y=0; y<h; y+=step){ border.push((y*w)*4); border.push((y*w+w-1)*4); }
+  let sr=0, sg=0, sb=0;
+  border.forEach(function(p){ sr+=d[p]; sg+=d[p+1]; sb+=d[p+2]; });
+  const mr = sr/border.length, mg = sg/border.length, mb = sb/border.length;
+  let variance = 0;
+  border.forEach(function(p){
+    const dr=d[p]-mr, dg=d[p+1]-mg, db=d[p+2]-mb;
+    variance += dr*dr + dg*dg + db*db;
+  });
+  variance = Math.sqrt(variance/border.length);
+  if(variance > 46) return false;
+
+  /* Tighter than the cut-out's own tolerance. That one was painting a photo
+     it could compare against the original; this one has to be right first
+     time, on every render, with no undo -- so it errs towards leaving a rim
+     of backdrop rather than taking a bite out of the garment. */
+  const tol2 = 30*30*3;
   const pale = function(idx){
     const p = idx*4;
-    const r = d[p], g = d[p+1], b = d[p+2];
-    const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
-    return mx >= 246 && (mx-mn) <= 12;
+    const dr=d[p]-mr, dg=d[p+1]-mg, db=d[p+2]-mb;
+    return (dr*dr + dg*dg + db*db) < tol2;
   };
 
   const seen = new Uint8Array(w*h);
@@ -4966,9 +4856,12 @@ function knockOutWhite(canvas){
     const touches = (x>0 && seen[idx-1]) || (x<w-1 && seen[idx+1])
                  || (y>0 && seen[idx-w]) || (y<h-1 && seen[idx+w]);
     if(!touches) continue;
+    /* Same measure as the fill, just given more rope -- these are the mixed
+       pixels along the garment's edge, so they are further from the backdrop
+       than the backdrop is, but much closer to it than the garment. */
     const p = idx*4;
-    const mx = Math.max(d[p],d[p+1],d[p+2]), mn = Math.min(d[p],d[p+1],d[p+2]);
-    if(mx >= 234 && (mx-mn) <= 16) halo[idx] = 1;
+    const dr=d[p]-mr, dg=d[p+1]-mg, db=d[p+2]-mb;
+    if((dr*dr + dg*dg + db*db) < 46*46*3) halo[idx] = 1;
   }
   for(let idx=0; idx<w*h; idx++) if(halo[idx]) seen[idx] = 1;
 
@@ -4995,57 +4888,28 @@ async function enhanceLayImages(){
   for(let n=0; n<nodes.length; n++){
     const el = nodes[n];
     const id = el.getAttribute('data-lay-img');
-    if(_layCache.has(id)){
-      const url = _layCache.get(id);
-      if(url) el.src = url;
-      continue;
-    }
+    /* A piece that could not be lifted off its background is framed as a
+       photograph instead -- rounded, with a soft edge. Left square it reads
+       as a cut-out that went wrong, sitting next to ones that worked; framed,
+       it reads as what it is, a picture of the thing on a table. */
+    const settle = function(url){
+      if(url && el.isConnected) el.src = url;
+      else el.classList.add('fl-photo');
+    };
+    if(_layCache.has(id)){ settle(_layCache.get(id)); continue; }
     const item = state.items.find(function(i){ return i.id===id; });
-    if(!item || !item.image){ _layCache.set(id, null); continue; }
+    if(!item || !item.image){ _layCache.set(id, null); settle(null); continue; }
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
-      const url = knockOutWhite(c) ? c.toDataURL('image/png') : null;
+      const url = isolateForLayout(c) ? c.toDataURL('image/png') : null;
       _layCache.set(id, url);
-      if(url && el.isConnected) el.src = url;
+      settle(url);
     }catch(e){
       _layCache.set(id, null);
+      settle(null);
     }
   }
-}
-
-/* ---------- cutting a piece you already added ----------
-   The lay-out only reads as a lay-out if the garments are separated from
-   whatever they were photographed on, and until now the only chance to do
-   that was the moment the photo was imported. A piece added with the cut-out
-   switched off, or one the cut declined at the time, was a rectangle of
-   somebody's floor for good.
-
-   The photo as stored is the only copy, so the original is kept alongside
-   before anything is painted over it -- one undo is worth the bytes, and
-   without it "cut" would be a one-way door on the only picture you have. */
-async function recutItem(item, force){
-  if(!item || !item.image) return {ok:false, reason:'error'};
-  const img = await loadImageFromDataUrl(item.image);
-  const work = drawToCanvas(img, 520);
-  const cut = cutOutBackground(work, {force:!!force});
-  if(!cut.applied) return {ok:false, reason:cut.reason || 'error'};
-  if(!item.imageOriginal) item.imageOriginal = item.image;
-  item.image = canvasToJpeg(work, 0.76);
-  _urlCache.delete(item.id);
-  _layCache.delete(item.id);   /* the lay-out copy is derived from the photo */
-  await saveItems();
-  return {ok:true};
-}
-
-async function undoRecut(item){
-  if(!item || !item.imageOriginal) return false;
-  item.image = item.imageOriginal;
-  delete item.imageOriginal;
-  _urlCache.delete(item.id);
-  _layCache.delete(item.id);   /* the lay-out copy is derived from the photo */
-  await saveItems();
-  return true;
 }
 
 function loadImageFromDataUrl(url){
@@ -5060,13 +4924,6 @@ function loadImageFromDataUrl(url){
   });
 }
 
-function cutReasonText(reason){
-  if(reason === 'busy background') return 'background kept — too cluttered to cut cleanly';
-  if(reason === 'no subject found') return 'background kept — could not find the piece';
-  if(reason === 'nothing to remove') return 'background kept — nothing to separate';
-  if(reason === 'error')             return 'background kept — the cut-out failed';
-  return 'background kept';
-}
 
 function renderBatchCard(b, idx){
   if(!b) return '';
@@ -5082,18 +4939,13 @@ function renderBatchCard(b, idx){
 
   return '<div class="batch-item" data-idx="'+idx+'">'
     + '<div class="batch-check-wrap"><input type="checkbox" class="batch-check" '+(b.selected?'checked':'')+'></div>'
-    + (b.cutAvailable ? '<button class="batch-cut '+(b.cutApplied?'on':'')+'">'+(b.cutApplied?'cut ✓':'cut ✗')+'</button>' : '')
-    + (!b.cutAvailable && b.cutReason && b.cutReason !== 'off'
-        ? '<button class="batch-cut retry" title="Cut it out anyway">cut ↻</button>' : '')
-    + '<img src="'+(b.cutApplied ? b.dataUrl : b.originalUrl)+'" alt="">'
+    + '<img src="'+b.dataUrl+'" alt="">'
     + '<div class="batch-fields">'
     +   '<input type="text" class="batch-name" placeholder="'+escapeHtml(suggestion)+'" value="'+escapeHtml(b.name)+'">'
     +   '<select class="batch-cat'+(b.category?'':' needs')+'">'
     +     (b.category ? '' : '<option value="" selected>which is it?</option>')
     +     categoryOptions(b.category)+'</select>'
     +   (guesses.length ? '<div class="batch-guess">read: '+escapeHtml(b.color||'—')+'</div>' : '')
-    +   (!b.cutAvailable && b.cutReason && b.cutReason !== 'off'
-          ? '<div class="batch-guess dim">' + escapeHtml(cutReasonText(b.cutReason)) + '</div>' : '')
     +   '<div class="batch-colors">'
     +     guesses.map(function(g){
             return '<div class="batch-color-dot '+(g.name===b.color?'sel':'')+'" data-color="'+g.name+'" '
@@ -5172,47 +5024,6 @@ function bindBatchCard(card){
     };
   }
 
-  const cutBtn = card.querySelector('.batch-cut:not(.retry)');
-  if(cutBtn){
-    cutBtn.onclick = function(){
-      b.cutApplied = !b.cutApplied;
-      cutBtn.classList.toggle('on', b.cutApplied);
-      cutBtn.textContent = b.cutApplied ? 'cut ✓' : 'cut ✗';
-      card.querySelector('img').src = b.cutApplied ? b.dataUrl : b.originalUrl;
-    };
-  }
-
-  /* Overrule the refusal for this one photo. It may well come out badly --
-     that is why it was declined -- so the result arrives with the usual
-     toggle, already comparable against the untouched original. */
-  const retryBtn = card.querySelector('.batch-cut.retry');
-  if(retryBtn){
-    retryBtn.onclick = async function(){
-      if(!b.file) return;
-      retryBtn.disabled = true; retryBtn.textContent = '…';
-      try{
-        const res = await processPhoto(b.file, true, true);
-        if(res.cutApplied){
-          b.dataUrl = res.dataUrl;
-          b.originalUrl = res.originalUrl;
-          b.cutApplied = true;
-          b.cutAvailable = true;
-          b.cutReason = null;
-          if(res.colors && res.colors.length){
-            b.colors = res.colors;
-            b.color = res.colors[0].name;
-          }
-        }else{
-          b.cutReason = res.cutReason || 'no subject found';
-          toast('Still could not separate it from the background');
-        }
-      }catch(e){
-        b.cutReason = 'error';
-        toast('The cut-out failed on that one');
-      }
-      renderBatchQueue();
-    };
-  }
 }
 
 function updateBatchUI(){
@@ -5293,7 +5104,7 @@ document.getElementById('saveBatchBtn').onclick = async function(){
       name: name,
       category: b.category,
       color: b.color || 'grey',
-      image: b.cutApplied ? b.dataUrl : b.originalUrl,
+      image: b.dataUrl,
       warmth: inf.warmth,
       formality: inf.formality,
       tags: inf.tags,
@@ -5953,15 +5764,6 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
-    +   '<div class="sb-title">Preferences</div>'
-    +   '<div class="gap-toggle-row" style="border-top:none;padding-top:0;">'
-    +     '<div class="t-txt"><div class="t-name">Cut out backgrounds by default</div>'
-    +     '<div class="t-sub">Applies to new photos. You can flip it per photo while reviewing.</div></div>'
-    +     '<button class="switch '+(state.cutout?'on':'')+'" id="settingsCutout"></button>'
-    +   '</div>'
-    + '</div>'
-
-    + '<div class="settings-block">'
     +   '<div class="sb-title">Version</div>'
     +   versionBlock()
     + '</div>'
@@ -6017,15 +5819,6 @@ function renderSettingsBody(){
 function bindSettingsHandlers(){
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
-
-  /* A switch is expected to take effect the moment it is flipped. It only
-     needed a Save button while it shared the block with a text field. */
-  const cutoutBtn = document.getElementById('settingsCutout');
-  if(cutoutBtn) cutoutBtn.onclick = async function(){
-    state.cutout = !state.cutout;
-    cutoutBtn.classList.toggle('on', state.cutout);
-    await savePrefs();
-  };
 
   const diagRun = document.getElementById('diagRunBtn');
   if(diagRun) diagRun.onclick = async function(){
