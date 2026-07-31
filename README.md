@@ -160,10 +160,47 @@ the piece afterwards and the app will read it from inside that — see
    no usable hue and are discarded, so no flash and no hard sun.
 7. **Warm bulbs are corrected up to a point.** The illuminant estimate is only
    trusted within a band; beyond it the correction is refused rather than
-   half-applied, and colours read warm. A window beats a lamp.
+   half-applied, and colours read warm. A window beats a lamp — though see
+   below, because in practice your phone has already done most of this.
 8. **One piece per photo**, straight on, whole thing in frame.
 
 The same list is in the app, under *Add piece*.
+
+### How much the warm-bulb limit actually costs
+
+Refusing a correction rather than clamping it is deliberate, and the cost looked
+alarming when simulated. Applying an increasingly orange cast to a rendered
+scene, the estimate is trusted up to about a 12% shift and refused past it, and
+accuracy falls off a cliff:
+
+| simulated cast | 0% | 12% | 18% | 24% | 30% | 40% |
+|---|---|---|---|---|---|---|
+| colours read right | 8/8 | 8/8 | 6/8 | 5/8 | 2/8 | 0/8 |
+
+That simulation is not a photograph, though, and the difference matters. **A
+phone applies its own auto white balance before it writes the JPEG**, so what
+reaches the app is a residual, not a raw cast. Measured on real indoor photos
+taken for this project under room lighting:
+
+| photo | implied correction |
+|---|---|
+| trainers held up in a lit room | 3% |
+| shirt on a bed | 2% — below the "leave it alone" floor |
+| a whole room, lamps and daylight mixed | 5% |
+
+None of them is within reach of the band's edge. The scenario the limit worries
+about does not arise in phone photos; what does hit the limit is a strongly
+coloured *surface* — wood, a blue wall, a rug — which is exactly what the
+refusal is there to protect.
+
+One idea that does not work, recorded so it is not tried again. The obvious
+second reference is the brightest pixels in the frame: under a coloured light
+even the highlights carry the cast, whereas under neutral light they should be
+near-white. Measured, they are not. A brown piece on pale wood under perfectly
+neutral light gives `[0.70, 0.97, 1.87]` — a *larger* implied correction than
+any warm lamp produces — because when nothing white is in shot, the brightest
+pixels are just the surface. It cannot tell a coloured light from a coloured
+floor either, and is worse than what is there now.
 
 ### What the photo decides, and what it asks you
 
