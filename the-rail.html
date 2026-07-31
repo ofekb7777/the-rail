@@ -1069,29 +1069,31 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.16';
+const APP_VERSION = '2026.08.17';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
 /* head-to-toe order doubles as the category list everywhere in the app */
 const CATEGORIES = [
-  {v:'headwear',  label:'Headwear (hat, cap, beanie)',           icon:'\u{1F9E2}'},
-  {v:'outerwear', label:'Outerwear (jacket, coat)',              icon:'\u{1F9E5}'},
-  {v:'dress',     label:'Dress / one-piece',                     icon:'\u{1F457}'},
-  {v:'top',       label:'Top (shirt, tee, knit)',                icon:'\u{1F455}'},
-  {v:'bottom',    label:'Bottom (jeans, trousers, skirt)',       icon:'\u{1F456}'},
-  {v:'footwear',  label:'Footwear',                              icon:'\u{1F45F}'},
-  {v:'jewellery', label:'Jewellery (rings, chains, earrings)',   icon:'\u{1F48D}'},
-  {v:'bag',       label:'Bag',                                   icon:'\u{1F45C}'},
-  {v:'accessory', label:'Other accessory (belt, scarf, watch)',  icon:'\u{1F9E3}'}
+  {v:'top',       label:'Top (shirt, tee, knit, jacket)',        icon:'\u{1F455}'},
+  {v:'bottom',    label:'Bottom (jeans, trousers, shorts)',      icon:'\u{1F456}'},
+  {v:'footwear',  label:'Shoes',                                 icon:'\u{1F45F}'},
+  {v:'accessory', label:'Accessory (bag, hat, belt, jewellery)', icon:'\u{1F9E3}'}
 ];
+/* What the app used to offer, and where each one now lands. Kept because
+   wardrobes and backups made before this exist and must still open. */
+const CATEGORY_MERGED = {
+  outerwear:'top', dress:'top',
+  headwear:'accessory', jewellery:'accessory', bag:'accessory'
+};
+function normaliseCategory(c){ return CATEGORY_MERGED[c] || c; }
 const CATEGORY_VALUES = CATEGORIES.map(c=>c.v);
 const CAT_ICON = {}; CATEGORIES.forEach(c=>{ CAT_ICON[c.v] = c.icon; });
 function categoryOptions(selected){
   return CATEGORIES.map(c=>'<option value="'+c.v+'"'+(c.v===selected?' selected':'')+'>'+c.label+'</option>').join('');
 }
 /* categories that sit on the body and therefore carry warmth */
-const BODY_CATS = ['outerwear','dress','top','bottom','footwear'];
+const BODY_CATS = ['top','bottom','footwear'];
 
 /* ============================================================
    COLOUR SCIENCE
@@ -1212,9 +1214,8 @@ function harmonyPartners(anchorName){
    produces is a starting point the user can overwrite by hand.
    ============================================================ */
 const CAT_DEFAULTS = {
-  headwear:{warm:2, form:2},  outerwear:{warm:4, form:3},  dress:{warm:2, form:3},
-  top:{warm:2.5, form:3},     bottom:{warm:3, form:3},     footwear:{warm:2.5, form:3},
-  jewellery:{warm:1, form:3}, bag:{warm:1, form:3},        accessory:{warm:2, form:3}
+  top:{warm:2.5, form:3},  bottom:{warm:3, form:3},
+  footwear:{warm:2.5, form:3}, accessory:{warm:2, form:3}
 };
 
 const KEYWORDS = [
@@ -1230,21 +1231,21 @@ const KEYWORDS = [
   {re:/(shoe|footwear)/,                                           cat:'footwear', warm:2.5, form:3},
 
   /* outerwear */
-  {re:/(puffer|down jacket|parka|anorak)/,                         cat:'outerwear', warm:5, form:2},
-  {re:/(overcoat|wool coat|trench|peacoat|pea coat|topcoat)/,      cat:'outerwear', warm:5, form:4},
-  {re:/(blazer|sport coat|suit jacket|dinner jacket)/,             cat:'outerwear', warm:3, form:5},
-  {re:/(leather jacket|biker jacket|moto jacket)/,                 cat:'outerwear', warm:4, form:3},
-  {re:/(denim jacket|jean jacket|trucker jacket)/,                 cat:'outerwear', warm:3, form:2},
-  {re:/(bomber|harrington|varsity|coach jacket)/,                  cat:'outerwear', warm:3, form:2},
-  {re:/(windbreaker|rain ?coat|rain ?jacket|cagoule)/,             cat:'outerwear', warm:3, form:2, tag:'rain'},
-  {re:/(gilet|body ?warmer|puffer vest)/,                          cat:'outerwear', warm:3, form:2},
-  {re:/(coat|jacket)/,                                             cat:'outerwear', warm:4, form:3},
+  {re:/(puffer|down jacket|parka|anorak)/,                         cat:'top', warm:5, form:2},
+  {re:/(overcoat|wool coat|trench|peacoat|pea coat|topcoat)/,      cat:'top', warm:5, form:4},
+  {re:/(blazer|sport coat|suit jacket|dinner jacket)/,             cat:'top', warm:3, form:5},
+  {re:/(leather jacket|biker jacket|moto jacket)/,                 cat:'top', warm:4, form:3},
+  {re:/(denim jacket|jean jacket|trucker jacket)/,                 cat:'top', warm:3, form:2},
+  {re:/(bomber|harrington|varsity|coach jacket)/,                  cat:'top', warm:3, form:2},
+  {re:/(windbreaker|rain ?coat|rain ?jacket|cagoule)/,             cat:'top', warm:3, form:2, tag:'rain'},
+  {re:/(gilet|body ?warmer|puffer vest)/,                          cat:'top', warm:3, form:2},
+  {re:/(coat|jacket)/,                                             cat:'top', warm:4, form:3},
 
   /* one-piece */
-  {re:/(gown|evening dress|ball dress)/,                           cat:'dress', warm:2, form:5},
-  {re:/(sun ?dress|slip dress|maxi dress|midi dress|mini dress|shirt dress|wrap dress)/, cat:'dress', warm:2, form:3},
-  {re:/(jumpsuit|romper|playsuit|boiler ?suit|dungaree|overall)/,  cat:'dress', warm:3, form:2},
-  {re:/(dress)/,                                                   cat:'dress', warm:2, form:3},
+  {re:/(gown|evening dress|ball dress)/,                           cat:'top', warm:2, form:5},
+  {re:/(sun ?dress|slip dress|maxi dress|midi dress|mini dress|shirt dress|wrap dress)/, cat:'top', warm:2, form:3},
+  {re:/(jumpsuit|romper|playsuit|boiler ?suit|dungaree|overall)/,  cat:'top', warm:3, form:2},
+  {re:/(dress)/,                                                   cat:'top', warm:2, form:3},
 
   /* tops */
   {re:/(tank top|vest top|cami|camisole|singlet)/,                 cat:'top', warm:1, form:1},
@@ -1271,15 +1272,15 @@ const KEYWORDS = [
   {re:/(trouser|pant|bottom)/,                                     cat:'bottom', warm:3, form:3},
 
   /* head */
-  {re:/(beanie|bobble hat|woolly hat)/,                            cat:'headwear', warm:5, form:1},
-  {re:/(cap|snapback|5 ?panel|five ?panel)/,                       cat:'headwear', warm:1, form:1},
-  {re:/(bucket hat|fedora|panama|beret|visor|headband|hat)/,       cat:'headwear', warm:2, form:2},
+  {re:/(beanie|bobble hat|woolly hat)/,                            cat:'accessory', warm:5, form:1},
+  {re:/(cap|snapback|5 ?panel|five ?panel)/,                       cat:'accessory', warm:1, form:1},
+  {re:/(bucket hat|fedora|panama|beret|visor|headband|hat)/,       cat:'accessory', warm:2, form:2},
 
   /* jewellery */
-  {re:/(ring|chain|necklace|pendant|bracelet|bangle|earring|anklet|brooch|choker|cuff ?link)/, cat:'jewellery', warm:1, form:3},
+  {re:/(ring|chain|necklace|pendant|bracelet|bangle|earring|anklet|brooch|choker|cuff ?link)/, cat:'accessory', warm:1, form:3},
 
   /* bags */
-  {re:/(backpack|rucksack|tote|purse|clutch|satchel|crossbody|messenger|duffel|holdall|handbag|shoulder bag|bag)/, cat:'bag', warm:1, form:3},
+  {re:/(backpack|rucksack|tote|purse|clutch|satchel|crossbody|messenger|duffel|holdall|handbag|shoulder bag|bag)/, cat:'accessory', warm:1, form:3},
 
   /* accessories */
   {re:/(scarf|snood|neckerchief)/,                                 cat:'accessory', warm:5, form:2},
@@ -1352,8 +1353,7 @@ function inferAttributes(rawName, knownCategory){
 /* A provisional name so a whole batch can be saved without typing. */
 function autoName(colorName, category){
   const NOUN = {
-    headwear:'hat', outerwear:'jacket', dress:'dress', top:'top', bottom:'bottoms',
-    footwear:'shoes', jewellery:'piece', bag:'bag', accessory:'accessory'
+    top:'top', bottom:'bottoms', footwear:'shoes', accessory:'accessory'
   };
   const noun = NOUN[category] || 'piece';
   const c = colorName || 'plain';
@@ -1501,6 +1501,13 @@ async function loadAll(){
        now that nothing edits a photo any more this is the last chance to undo
        it. Anything still holding an original gets it back, and the spare copy
        is dropped so the wardrobe stops carrying two of everything. */
+    /* The category list used to have nine entries and now has four. A
+       wardrobe built before that holds values the picker can no longer show,
+       so they are moved to where they belong: a coat is a top, a hat is an
+       accessory. Done once, on load, rather than left to surprise the
+       outfit engine later. */
+    const merged = normaliseCategory(i.category);
+    if(merged !== i.category){ i.category = merged; migrated = true; }
     if(i.imageOriginal){
       i.image = i.imageOriginal;
       delete i.imageOriginal;
@@ -1584,6 +1591,10 @@ async function importBackup(file, mode){
     });
   }
   if(data.prefs && data.prefs.temp) state.temp = tempBand(data.prefs.temp).v;
+  /* A backup taken before the category list was cut to four carries the old
+     values, and unlike the wardrobe on disk this arrives after the migration
+     on load has already run. */
+  state.items.forEach(function(i){ i.category = normaliseCategory(i.category); });
   state.items.forEach(enrichItem);
   await saveItems(); await saveOutfits(); await saveWearLog(); await savePlans(); await savePrefs();
 }
@@ -2695,10 +2706,10 @@ function formalityScore(items, prof){
 
 function warmthScore(items, ctx){
   const body = items.filter(function(i){
-    return ['top','bottom','dress','outerwear'].indexOf(i.category) > -1;
+    return ['top','bottom'].indexOf(i.category) > -1;
   });
   const shoes = items.filter(function(i){ return i.category==='footwear'; });
-  if(!body.length) return {score:2.5, mean:ctx.warmTarget, hasOuter:false, spread:0};
+  if(!body.length) return {score:2.5, mean:ctx.warmTarget, spread:0};
 
   /* Shoes count toward how warm a look is — boots in July are a real mistake —
      but at half weight, because they matter less than what covers your body. */
@@ -2708,23 +2719,23 @@ function warmthScore(items, ctx){
   const mean = wsum/n;
 
   let s = 5 - 2.4*Math.abs(mean - ctx.warmTarget);
-  const hasOuter = items.some(function(i){ return i.category==='outerwear'; });
-  if(ctx.warmTarget >= 3.5 && !hasOuter) s -= 1.5;
-  if(ctx.warmTarget <= 1.8 && hasOuter)  s -= 2.0;
+  /* There is no separate outerwear slot now that a jacket is simply a warm
+     top, so a cold day is answered by how warm the top is rather than by
+     whether a coat was added on top of it. */
+  if(ctx.warmTarget >= 3.5 && mean < 3.2) s -= 1.5;
   /* The band is always a deliberate answer, so warmth is scored at full
      strength -- the old code halved its own opinion because a forecast
      might have been missing. */
 
   /* A knit jumper with shorts is incoherent whatever the weather, so this
      one applies regardless of which band you picked. */
-  const layers = body.filter(function(i){ return i.category!=='outerwear'; })
-                     .map(function(i){ return i.warmth; });
+  const layers = body.map(function(i){ return i.warmth; });
   let spread = 0;
   if(layers.length > 1){
     spread = Math.max.apply(null, layers) - Math.min.apply(null, layers);
     if(spread > 1.6) s -= 0.9*(spread - 1.6);
   }
-  return {score: clamp(s,0,5), mean:mean, hasOuter:hasOuter, spread:spread};
+  return {score: clamp(s,0,5), mean:mean, spread:spread};
 }
 
 function rotationScore(items){
@@ -2844,26 +2855,18 @@ function generateLooks(opts){
   /* Which shapes of outfit are even possible with this wardrobe? */
   const paths = [];
   if(has('top') && has('bottom')) paths.push(['top','bottom']);
-  if(has('dress'))                paths.push(['dress']);
   if(!paths.length){
     /* not enough to build a real outfit — pair whatever exists */
     paths.push([]);
   }
 
-  const needOuter = ctx.warmTarget >= 3.4 && has('outerwear');
   const candidates = [];
 
   paths.forEach(function(base){
     /* the anchor already fills its own slot */
     const slots = base.filter(function(s){ return !anchor || anchor.category !== s; });
-    if(anchor && base.indexOf(anchor.category) === -1 && (anchor.category==='top'||anchor.category==='bottom'||anchor.category==='dress')){
-      /* a dress anchor can't sit in a top+bottom look, and vice versa */
-      if(anchor.category === 'dress' && base.length === 2) return;
-      if(anchor.category !== 'dress' && base.indexOf('dress') > -1) return;
-    }
     const full = slots.slice();
     if(has('footwear') && (!anchor || anchor.category !== 'footwear')) full.push('footwear');
-    if(needOuter && (!anchor || anchor.category !== 'outerwear')) full.push('outerwear');
 
     const pools = full.map(function(s){ return poolFor(s, ctx, exclude, 5); })
                       .filter(function(p){ return p.length; });
@@ -2916,7 +2919,7 @@ function generateLooks(opts){
   }).sort(function(a,b){ return b.score.total - a.score.total; }).slice(0, 60);
 
   /* Finishing touches: at most `flourish` extras, and only if they help. */
-  const flourishSlots = ['jewellery','accessory','bag','headwear'];
+  const flourishSlots = ['accessory'];
   scored.slice(0, 12).forEach(function(cand){
     let added = 0;
     const taken = {};
@@ -2996,7 +2999,7 @@ function leadColour(items, cs){
   if(cs.bold.length === 1) return cs.bold[0];
   const weight = {};
   items.forEach(function(i){
-    const w = i.category==='outerwear' ? 3 : (i.category==='dress' ? 3 : (i.category==='top'||i.category==='bottom' ? 2 : 1));
+    const w = (i.category==='top'||i.category==='bottom') ? 2 : 1;
     weight[i.color] = (weight[i.color]||0) + w;
   });
   return Object.keys(weight).sort(function(a,b){ return weight[b]-weight[a]; })[0];
@@ -3030,7 +3033,7 @@ function titleFor(items, score, ctx){
     default:
       bank = ['Quiet neutrals', 'Easy and unfussy', 'Reliable']; break;
   }
-  if(score.warmth.hasOuter && ctx.band.v === 'cold'){
+  if(score.warmth.mean >= 3.8 && ctx.band.v === 'cold'){
     bank = bank.concat(['Layered for the cold', 'Built for the cold']);
   }
   if(ctx.band.v === 'warm') bank = bank.concat(['Light enough for the heat']);
@@ -3078,14 +3081,18 @@ function describeLook(items, score, ctx){
   /* 3 — warmth, against the band you picked, and honestly: if the warmth
          score came out poor, say so rather than bluffing */
   {
-    const outer = items.find(function(i){ return i.category==='outerwear'; });
     const warmOK = score.warmth.score >= 3;
     if(!warmOK){
       lines.push(score.warmth.mean > ctx.warmTarget
         ? 'Fair warning — this runs warm for '+ctx.band.phrase+'.'
         : 'This runs light for '+ctx.band.phrase+' — worth putting something over it.');
-    }else if(outer && ctx.band.v === 'cold'){
-      lines.push('In the cold, the heavy lifting is done by the '+outer.name.toLowerCase()+'.');
+    }else if(ctx.band.v === 'cold'){
+      /* Whatever is warmest in the look is what is doing the work now that a
+         coat is simply a warm top rather than a slot of its own. */
+      const heaviest = items.slice().sort(function(a,b){ return (b.warmth||3)-(a.warmth||3); })[0];
+      lines.push(heaviest && (heaviest.warmth||3) >= 4
+        ? 'In the cold, the heavy lifting is done by the '+heaviest.name.toLowerCase()+'.'
+        : 'Comfortable for '+ctx.band.phrase+'.');
     }else if(ctx.band.v === 'warm'){
       lines.push('Light enough for the heat.');
     }else{
@@ -3210,7 +3217,7 @@ function goodBases(){
     return state.items.filter(function(i){ return i.category===c; }).slice(0, 22);
   };
   const tops = byCat('top'), bottoms = byCat('bottom');
-  const shoes = byCat('footwear'), dresses = byCat('dress');
+  const shoes = byCat('footwear');
   const out = [];
   if(shoes.length){
     tops.forEach(function(t){
@@ -3218,9 +3225,6 @@ function goodBases(){
         if(!comboWorks([t,b])) return;
         shoes.forEach(function(s){ if(comboWorks([t,b,s])) out.push([t,b,s]); });
       });
-    });
-    dresses.forEach(function(d){
-      shoes.forEach(function(s){ if(comboWorks([d,s])) out.push([d,s]); });
     });
   }else{
     tops.forEach(function(t){
@@ -3236,12 +3240,8 @@ function goodBases(){
    looks it could sit over, which is a cold-weather number, not the same unit;
    accessories finish outfits rather than creating them, so they score zero. */
 function unlockCount(virt, base){
-  if(['top','bottom','dress','footwear'].indexOf(virt.category) > -1){
+  if(['top','bottom','footwear'].indexOf(virt.category) > -1){
     return {n: countGoodLooks(virt) - base, kind:'outfits'};
-  }
-  if(virt.category === 'outerwear'){
-    const n = goodBases().filter(function(b){ return comboWorks(b.concat([virt])); }).length;
-    return {n:n, kind:'cold-weather outfits'};
   }
   return {n:0, kind:'outfits'};
 }
@@ -3254,7 +3254,7 @@ function countGoodLooks(extra){
     return all.filter(function(i){ return i.category===c; }).slice(0, 22);
   };
   const tops = byCat('top'), bottoms = byCat('bottom');
-  const shoes = byCat('footwear'), dresses = byCat('dress');
+  const shoes = byCat('footwear');
   let n = 0;
 
   if(shoes.length){
@@ -3264,11 +3264,6 @@ function countGoodLooks(extra){
         for(let c=0;c<shoes.length;c++){
           if(comboWorks([tops[a], bottoms[b], shoes[c]])) n++;
         }
-      }
-    }
-    for(let d=0;d<dresses.length;d++){
-      for(let c=0;c<shoes.length;c++){
-        if(comboWorks([dresses[d], shoes[c]])) n++;
       }
     }
   }else{
@@ -3293,14 +3288,16 @@ function coverageCheck(occasion, temp){
   }).filter(Boolean);
 
   const cats = items.map(function(i){ return i.category; });
-  const hasBase = (cats.indexOf('top')>-1 && cats.indexOf('bottom')>-1) || cats.indexOf('dress')>-1;
+  const hasBase = cats.indexOf('top')>-1 && cats.indexOf('bottom')>-1;
   const hasShoes = cats.indexOf('footwear')>-1;
-  const needOuter = tempBand(temp).target >= 3.4;
-  const hasOuter = cats.indexOf('outerwear')>-1;
+  /* A cold day is now answered by a warm top rather than by a separate coat,
+     so the question is whether anything in the look is actually warm enough. */
+  const needWarm = tempBand(temp).target >= 3.4;
+  const warmEnough = items.some(function(i){ return (i.warmth||3) >= 4; });
 
   if(!hasBase)  return {ok:false, missing:'a top and a bottom', occasion:occasion, temp:temp};
   if(!hasShoes) return {ok:false, missing:'shoes', occasion:occasion, temp:temp};
-  if(needOuter && !hasOuter) return {ok:false, missing:'a warm layer', occasion:occasion, temp:temp};
+  if(needWarm && !warmEnough) return {ok:false, missing:'a warm layer', occasion:occasion, temp:temp};
 
   const score = scoreLook(items, ctx);
   if(score.formality.score < 2.2){
@@ -3330,14 +3327,14 @@ const GAP_TEMPLATES = [
   {name:'Black leather boots',      cat:'footwear',  color:'black',  form:4, warm:4},
   {name:'Brown leather loafers',    cat:'footwear',  color:'brown',  form:4, warm:3},
   {name:'Black derby shoes',        cat:'footwear',  color:'black',  form:5, warm:3},
-  {name:'Navy wool overcoat',       cat:'outerwear', color:'navy',   form:4, warm:5},
-  {name:'Black puffer jacket',      cat:'outerwear', color:'black',  form:2, warm:5},
-  {name:'Denim jacket',             cat:'outerwear', color:'denim',  form:2, warm:3},
-  {name:'Olive utility jacket',     cat:'outerwear', color:'olive',  form:2.5, warm:3.5},
-  {name:'Beige trench coat',        cat:'outerwear', color:'beige',  form:4, warm:4, tags:['rain']},
+  {name:'Navy wool overcoat',       cat:'top', color:'navy',   form:4, warm:5},
+  {name:'Black puffer jacket',      cat:'top', color:'black',  form:2, warm:5},
+  {name:'Denim jacket',             cat:'top', color:'denim',  form:2, warm:3},
+  {name:'Olive utility jacket',     cat:'top', color:'olive',  form:2.5, warm:3.5},
+  {name:'Beige trench coat',        cat:'top', color:'beige',  form:4, warm:4, tags:['rain']},
   {name:'Black leather belt',       cat:'accessory', color:'black',  form:3, warm:1},
-  {name:'Simple silver chain',      cat:'jewellery', color:'silver', form:3, warm:1},
-  {name:'Black leather tote',       cat:'bag',       color:'black',  form:3.5, warm:1}
+  {name:'Simple silver chain',      cat:'accessory', color:'silver', form:3, warm:1},
+  {name:'Black leather tote',       cat:'accessory',       color:'black',  form:3.5, warm:1}
 ];
 
 function templateToItem(t){
@@ -3371,7 +3368,7 @@ function wardrobeFacts(){
     tops: counts.top + counts.dress,
     bottoms: counts.bottom + counts.dress,
     shoes: counts.footwear,
-    outer: counts.outerwear,
+    outer: counts.top,
     total: state.items.length
   };
 }
@@ -3428,7 +3425,7 @@ function analyseGaps(){
     /* does it fix a scenario that currently fails outright? */
     failures.forEach(function(fl){
       if(fl.missing==='shoes' && t.cat==='footwear') bonus += 14;
-      if(fl.missing==='a warm layer' && t.cat==='outerwear' && t.warm>=4) bonus += 14;
+      if(fl.missing==='a warm layer' && t.warm>=4) bonus += 14;
       if(fl.missing==='a top and a bottom' && (t.cat==='top'||t.cat==='bottom')) bonus += 12;
       if(fl.missing && fl.missing.indexOf('formality')>-1){
         const prof = occasionProfile(fl.occasion);
@@ -3443,7 +3440,7 @@ function analyseGaps(){
     /* a cold-weather outfit is worth having but only counts part of the year */
     const weighted = unlock.kind === 'outfits' ? delta : delta*0.6;
     /* accessories can still surface, just never near the top */
-    const floor = (delta === 0 && ['accessory','jewellery','bag'].indexOf(t.cat) > -1) ? 1.5 : 0;
+    const floor = (delta === 0 && t.cat === 'accessory') ? 1.5 : 0;
 
     return {t:t, delta:delta, kind:unlock.kind, gain: weighted + bonus + floor};
   }).filter(function(x){ return x.gain > 0; })
@@ -3532,7 +3529,7 @@ function gapReason(x, f, base){
     lead = x.kind === 'cold-weather outfits'
       ? 'Would layer over '+x.delta+' of the looks you can already build.'
       : 'Adds roughly '+x.delta+' new workable combination'+(x.delta===1?'':'s')+'.';
-  }else if(['accessory','jewellery','bag'].indexOf(t.cat) > -1){
+  }else if(t.cat === 'accessory'){
     lead = 'Will not create new outfits on its own, but finishes a lot of the ones you have.';
   }else{
     lead = 'Fills a hole nothing else in the wardrobe covers.';
@@ -3542,7 +3539,7 @@ function gapReason(x, f, base){
     return lead+' Works straight away with your '+partners.join(', ')+'.';
   }
   if(t.cat==='footwear' && !f.shoes) return lead+' Without shoes, nothing here can be finished into a full outfit.';
-  if(t.cat==='outerwear' && !f.outer) return lead+' You have no outer layer at all, so cold days are uncovered.';
+  if(t.warm>=4 && !f.outer) return lead+' You have nothing warm at all, so cold days are uncovered.';
   return lead;
 }
 
@@ -3891,7 +3888,7 @@ function renderToday(){
 }
 
 /* head-to-toe ordering for the lookbook layout */
-const CAT_ORDER = {headwear:1, outerwear:2, dress:3, top:4, bottom:5, footwear:6, jewellery:7, bag:8, accessory:9};
+const CAT_ORDER = {top:1, bottom:2, footwear:3, accessory:4};
 
 /* Older saved outfits are a single object; fresh results hold several options. */
 function normalizeResult(r){
@@ -3924,22 +3921,20 @@ function normalizeResult(r){
    fit on one screen or it is not showing you how it goes together, it is
    showing you a piece at a time -- which the grid already does. */
 const LAY_ROWS = [
-  {cats:['headwear'],            w:'24%'},
-  {cats:['outerwear','top','dress'], w:null},   /* per-item, set below */
+  {cats:['top'],                 w:null},   /* per-item, set below */
   {cats:['bottom'],              w:'48%'},
   {cats:['footwear'],            w:'30%'},
   /* The small things are set apart rather than stacked into the body, because
      they are not worn in that order -- a bag does not go below the shoes. The
      rows above overlap to close the empty margin inside each photo; this one
      must not, or the bag ends up sitting on the boots. */
-  {cats:['bag','jewellery','accessory'], w:'17%', cls:'fl-extras'}
+  {cats:['accessory'], w:'17%', cls:'fl-extras'}
 ];
 /* One piece on the top row should not shrink to half the row's width just
    because it is alone, and a dress reads as a whole outfit rather than a
    half of one. */
 function layWidth(cat, shared){
-  if(cat === 'dress') return shared ? '40%' : '48%';
-  if(cat === 'outerwear' || cat === 'top') return shared ? '44%' : '52%';
+  if(cat === 'top') return shared ? '44%' : '52%';
   return '44%';
 }
 
@@ -4454,12 +4449,10 @@ function rankRow(r, val, cls, sub){
 const detailOverlay = document.getElementById('detailOverlay');
 
 const BUILDER_SLOTS = [
-  {key:'outerwear', cats:['outerwear'],                             label:'Outer',  icon:'\u{1F9E5}'},
-  {key:'top',       cats:['top'],                                   label:'Top',    icon:'\u{1F455}'},
-  {key:'bottom',    cats:['bottom'],                                label:'Bottom', icon:'\u{1F456}'},
-  {key:'dress',     cats:['dress'],                                 label:'Dress',  icon:'\u{1F457}'},
-  {key:'footwear',  cats:['footwear'],                              label:'Shoes',  icon:'\u{1F45F}'},
-  {key:'extra',     cats:['jewellery','bag','accessory','headwear'],label:'Extra',  icon:'\u{1F48D}'}
+  {key:'top',       cats:['top'],       label:'Top',    icon:'\u{1F455}'},
+  {key:'bottom',    cats:['bottom'],    label:'Bottom', icon:'\u{1F456}'},
+  {key:'footwear',  cats:['footwear'],  label:'Shoes',  icon:'\u{1F45F}'},
+  {key:'extra',     cats:['accessory'], label:'Extra',  icon:'\u{1F48D}'}
 ];
 
 function openBuilder(opts){
@@ -4716,7 +4709,7 @@ function openSlotPicker(slotKey){
     c.onclick = function(){
       state.builder.slots[slotKey] = c.dataset.pick;
       /* a dress and a top+bottom can't coexist */
-      if(slotKey==='dress'){ delete state.builder.slots.top; delete state.builder.slots.bottom; }
+
       if(slotKey==='top' || slotKey==='bottom'){ delete state.builder.slots.dress; }
       renderBuilderSheet();
     };
@@ -5955,14 +5948,14 @@ const DEMO_PIECES = [
   ['Navy merino knit',           'top',        'knit',        '#1f2b4d','navy',       null],
   ['Black cotton t-shirt',       'top',        'top',         '#1a1a1a','black',      {short:true}],
   ['Burgundy linen shirt',       'top',        'top',         '#5c1f2e','burgundy',   {placket:true}],
-  ['Navy wool overcoat',         'outerwear',  'outerwear',   '#1f2b4d','navy',       null],
-  ['Olive field jacket',         'outerwear',  'outerwear',   '#6b7c3a','olive',      {short:true}],
-  ['Charcoal wool blazer',       'outerwear',  'outerwear',   '#3b3f45','charcoal',   {short:true}],
+  ['Navy wool overcoat',         'top',  'outerwear',   '#1f2b4d','navy',       null],
+  ['Olive field jacket',         'top',  'outerwear',   '#6b7c3a','olive',      {short:true}],
+  ['Charcoal wool blazer',       'top',  'outerwear',   '#3b3f45','charcoal',   {short:true}],
   ['Black tailored trousers',    'bottom',     'bottom',      '#1a1a1a','black',      null],
   ['Dark indigo jeans',          'bottom',     'bottom',      '#4a6b8a','denim',      {denim:true}],
   ['Tan chino trousers',         'bottom',     'bottom',      '#b08a5f','tan',        null],
   ['Black pleated skirt',        'bottom',     'skirt',       '#1a1a1a','black',      null],
-  ['Teal midi dress',            'dress',      'dress',       '#2f7f7a','teal',       null],
+  ['Teal midi dress',            'top',      'dress',       '#2f7f7a','teal',       null],
   ['Black chelsea boots',        'footwear',   'boot',        '#1a1a1a','black',      null],
   ['White leather sneakers',     'footwear',   'sneaker',     '#f5f5f0','white',      null],
   ['Brown leather loafers',      'footwear',   'shoe',        '#6b4a30','brown',      null],
@@ -6001,7 +5994,7 @@ async function loadDemoWardrobe(){
      dust" and the never-worn count have something true to report. */
   const byCat = function(c){ return made.filter(function(i){ return i.category===c; }); };
   const tops = byCat('top'), bottoms = byCat('bottom'), shoes = byCat('footwear');
-  const outer = byCat('outerwear');
+  const outer = byCat('top');
   const idle = {};
   idle[made[4].id] = true;   /* burgundy linen shirt */
   idle[made[12].id] = true;  /* teal midi dress */

@@ -126,6 +126,9 @@ try {
       x.drawImage(layer, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
       return new Promise((r) => c.toBlob((b) => r(new File([b], 's.png', { type: 'image/png' })), 'image/png'));
     };
+    // These are drawing names, not categories -- there are only four of those
+    // now. What is under test is unchanged: the guess claims trousers and
+    // shoes, and abstains on anything worn on the torso.
     const EXPECT = {
       shoe: 'footwear', bottom: 'bottom',
       top: null, knit: null, outerwear: null, skirt: null, dress: null,
@@ -187,7 +190,10 @@ try {
         missed.push(`out of order: ${flat[i - 1]} above ${flat[i]}`);
       }
     }
-    if (!rows.some((r) => r.length === 2)) missed.push('outerwear and top did not share a row');
+    // Rows used to hold outerwear beside a top. With four categories there is
+    // one garment per row, so what matters is that each row has something and
+    // the order runs head to foot.
+    if (!rows.length) missed.push('the lay-out produced no rows');
     if (!fl.querySelector('.fl-item[data-swap]')) missed.push('no piece was swappable from the lay-out');
 
     // Pieces sit at a slight angle so the lay-out reads as cloth on a bed
@@ -396,6 +402,25 @@ try {
     return missed;
   });
   for (const m of deadEnds) failures.push(`empty state: ${m}`);
+
+  // The category list went from nine to four. A wardrobe or a backup made
+  // before that still holds the old values, and an item left on one the
+  // picker cannot show is invisible to the outfit engine.
+  const strays = await page.evaluate(async () => {
+    const missed = [];
+    if (CATEGORIES.length !== 4) missed.push(`expected four categories, found ${CATEGORIES.length}`);
+    for (const [old, want] of Object.entries({
+      outerwear: 'top', dress: 'top', headwear: 'accessory', jewellery: 'accessory', bag: 'accessory',
+    })) {
+      if (normaliseCategory(old) !== want) missed.push(`"${old}" did not migrate to "${want}"`);
+    }
+    await loadDemoWardrobe();
+    const bad = state.items.filter((i) => !CATEGORY_VALUES.includes(i.category));
+    if (bad.length) missed.push(`${bad.length} demo pieces sit outside the four categories`);
+    if (!generateLooks({ count: 1 }).length) missed.push('the stylist built nothing after the merge');
+    return missed;
+  });
+  for (const m of strays) failures.push(`categories: ${m}`);
 
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.

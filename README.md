@@ -160,6 +160,16 @@ Note that colour survives a background the app cannot separate. The two are
 independent: it can decline to isolate a piece for the lay-out and still name
 its colour correctly, down to about a third of a percent of the frame.
 
+There are four categories — **Top, Bottom, Shoes, Accessory** — and nothing
+else. A jacket is a warm top; a hat, a bag and a belt are accessories. The list
+used to have nine, which meant nine things to read before every save. A wardrobe
+or a backup made before the change migrates on open, so nothing is stranded on a
+category the picker can no longer show.
+
+The trade is layering: with no separate outerwear slot the app suggests one top
+rather than a shirt with a coat over it, and a cold day is answered by how warm
+that top is instead.
+
 **The category is guessed only when the silhouette is unmistakable**, and
 otherwise it asks. Measured off the app's own garment renders, height against
 width comes out as:
