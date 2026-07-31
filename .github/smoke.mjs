@@ -159,6 +159,48 @@ try {
   });
   for (const m of shadowMisses) failures.push(`colour: ${m}`);
 
+  // Every colour test above uses a square PNG. A phone produces neither: it
+  // produces a tall JPEG, and the piece is a smaller share of a tall frame at
+  // the same distance. Beige on pale linen read "silver" in portrait, in
+  // landscape, and at every JPEG quality, while being correct in the square
+  // renders next to it -- so the shape of the frame was the whole difference,
+  // and nothing in the suite was looking at it.
+  const frameMisses = await page.evaluate(async () => {
+    const shot = (hex, backdrop, W, H, q) => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = backdrop; x.fillRect(0, 0, W, H);
+      x.save();
+      x.globalAlpha = 0.35; x.filter = 'blur(18px)'; x.fillStyle = '#000';
+      x.beginPath(); x.ellipse(W * 0.5, H * 0.76, W * 0.30, H * 0.07, 0, 0, 7); x.fill();
+      x.restore();
+      const S = 400, l = document.createElement('canvas');
+      l.width = l.height = S;
+      DEMO_SHAPES.top(l.getContext('2d'), hex, S, S, {});
+      const side = Math.round(Math.min(W, H) * 0.62);
+      x.drawImage(l, Math.round((W - side) / 2), Math.round((H - side) / 2), side, side);
+      const type = q ? 'image/jpeg' : 'image/png';
+      return new Promise((r) => c.toBlob((b) => r(new File([b], 's', { type })), type, q || undefined));
+    };
+    const missed = [];
+    for (const [label, W, H, q] of [
+      ['portrait 3:4', 480, 640, null],
+      ['landscape 4:3', 640, 480, null],
+      ['tall 9:16', 420, 746, null],
+      ['portrait JPEG q0.76', 480, 640, 0.76],
+      ['portrait JPEG q0.6', 480, 640, 0.6],
+    ]) {
+      for (const want of ['beige', 'navy', 'white', 'red']) {
+        const r = await processPhoto(await shot(colorByName(want).hex, '#d8d3c7', W, H, q));
+        const got = r.colors.length ? r.colors[0].name : '(nothing)';
+        if (got !== want) missed.push(`${want} in a ${label} frame read as "${got}"`);
+      }
+    }
+    return missed;
+  });
+  for (const m of frameMisses) failures.push(`colour: ${m}`);
+
   // The category guess reads the silhouette and is deliberately narrow: it
   // claims trousers and shoes and abstains on everything else. What must not
   // drift is the abstention -- a photographed jumper quietly filed as footwear
