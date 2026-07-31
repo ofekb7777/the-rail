@@ -110,6 +110,55 @@ try {
   });
   for (const m of colourMisses) failures.push(`colour: ${m}`);
 
+  // Pale clothes on a pale surface with a shadow under them. The four bold
+  // hues above never caught this: a white shirt photographed on a white sheet
+  // came back *grey*, and so did silver and beige, because the flood ate the
+  // garment and left the shadow standing -- so the colour was read off the
+  // shadow. Neutrals are most of a wardrobe, and "your white shirt is grey" is
+  // the kind of wrong answer that discredits everything built on it.
+  const shadowMisses = await page.evaluate(async () => {
+    const shot = (hex, backdrop) => {
+      const W = 560, c = document.createElement('canvas');
+      c.width = c.height = W;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = backdrop; x.fillRect(0, 0, W, W);
+      // a soft shadow cast onto the surface, clear of where the piece sits
+      x.save();
+      x.globalAlpha = 0.35; x.filter = 'blur(18px)'; x.fillStyle = '#000';
+      x.beginPath(); x.ellipse(W * 0.5, W * 0.76, W * 0.34, W * 0.09, 0, 0, 7); x.fill();
+      x.restore();
+      const S = 400, l = document.createElement('canvas');
+      l.width = l.height = S;
+      DEMO_SHAPES.top(l.getContext('2d'), hex, S, S, {});
+      const side = Math.round(W * 0.6);
+      x.drawImage(l, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
+      return new Promise((r) => c.toBlob((b) => r(new File([b], 's.png', { type: 'image/png' })), 'image/png'));
+    };
+    const missed = [];
+    for (const [want, backdrop, where] of [
+      ['white', '#f4f4f2', 'a white sheet'],
+      ['white', '#d8d3c7', 'pale linen'],
+      ['silver', '#d8d3c7', 'pale linen'],
+      ['beige', '#d8d3c7', 'pale linen'],
+      ['silver', '#f4f4f2', 'a white sheet'],
+      // Cream on white is what pins the shadow rule's tolerance down. Cream
+      // really is white slightly dimmed, so a loose rule eats it as shadow and
+      // the shirt comes back white -- which is how a fix for one neutral turns
+      // into a failure on the next one along. Measured: it fails at 18 and
+      // passes at 11.
+      ['cream', '#f4f4f2', 'a white sheet'],
+      // and the other end, which must not regress while fixing the pale one
+      ['black', '#d8d3c7', 'pale linen'],
+      ['navy', '#f4f4f2', 'a white sheet'],
+    ]) {
+      const r = await processPhoto(await shot(colorByName(want).hex, backdrop));
+      const got = r.colors.length ? r.colors[0].name : '(nothing)';
+      if (got !== want) missed.push(`${want} on ${where} with a shadow read as "${got}"`);
+    }
+    return missed;
+  });
+  for (const m of shadowMisses) failures.push(`colour: ${m}`);
+
   // The category guess reads the silhouette and is deliberately narrow: it
   // claims trousers and shoes and abstains on everything else. What must not
   // drift is the abstention -- a photographed jumper quietly filed as footwear

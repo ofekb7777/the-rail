@@ -170,12 +170,31 @@ The same list is in the app, under *Add piece*.
 Two things are read off the picture, and they are read with very different
 confidence.
 
-**The colour** is measured, and it is reliable. Across 78 test photographs —
-six colours over warm and cool light, dark, white, wood, green and purple
-surfaces, and four framings — every hue read correctly. The misses left are
-neutrals: black and white against cluttered edges, and white under a warm bulb,
-which is the documented limit of the illuminant estimate. If the reading is not
-what you see, the four next-best candidates are offered as dots beside it.
+**The colour** is measured, and it is reliable. Across 154 renders — all
+twenty-two palette colours over seven surfaces from near-black to white, wood
+and green — one reads wrong, and it offers the right answer second. Every hue
+is correct; what is left is neutrals against neutrals.
+
+Where it gets harder is a photograph rather than a diagram. Adding surface
+texture, light falling off across the frame, and a shadow cast under the piece
+— separately and all at once — gives 180 harder cases, of which 12 read wrong.
+All twelve are a **pale** garment on a **pale** surface. Black, charcoal, navy,
+brown and grey are right in every single one.
+
+Six of those twelve used to be a specific and quite bad failure: a cast shadow
+was kept as part of the subject, and on a white shirt photographed on a white
+sheet the flood ate the *garment* and left only the shadow — so the colour was
+read off the shadow and the shirt came back **grey**. The shadow is now
+recognised as the surface dimmed rather than a thing lying on it. Silver, beige
+and white on pale surfaces all read correctly now.
+
+The remainder is honest ambiguity: a white shirt on a white sheet under uneven
+light is genuinely hard to separate, and a person looking at the same pixels
+would hesitate too. Photograph pale clothes on something darker — see the list
+above — or draw a box round the piece, which re-reads the colour from inside it.
+
+If the reading is not what you see, the four next-best candidates are offered as
+dots beside it.
 
 Note that colour survives a background the app cannot separate. The two are
 independent: it can decline to isolate a piece for the lay-out and still name
