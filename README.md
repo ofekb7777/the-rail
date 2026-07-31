@@ -297,6 +297,22 @@ A piece that could not be lifted at all is framed as a photograph — rounded,
 softly shadowed — rather than left as a bare square, so it reads as a picture of
 the thing on a table rather than a cut-out that went wrong.
 
+### Turning the cut off
+
+Under the lay-out on **Today** there is a switch: *Pieces are cut out of their
+photos* / *Showing the photos as taken*. It is on by default, because a lay-out
+of cut-outs is the point of the view — but the cut is a guess, and when it
+guesses wrong on a piece there has to be a way to see the photograph instead of
+arguing with it.
+
+Switched off, every piece takes the same path as one that could not be lifted:
+framed as a photograph. Nothing is decoded or cut, so it is also the quickest
+way to draw the view. The setting is remembered.
+
+It sits beside the lay-out rather than in Settings because it is a thing you
+judge by looking — you can see the cut is wrong, and the switch is right there
+under it.
+
 ### Drawing a box round a piece
 
 Some photographs cannot be read automatically and no amount of tuning will

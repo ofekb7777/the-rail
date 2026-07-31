@@ -559,6 +559,83 @@ try {
   });
   for (const m of markMisses) failures.push(`marking: ${m}`);
 
+  // The cut can be switched off from the lay-out itself. The cut is a guess,
+  // and when it guesses wrong there has to be a way to see the photograph
+  // instead of arguing with it -- so what is under test is that the switch
+  // actually reaches the pictures, both ways, and survives a reload.
+  const cutMisses = await page.evaluate(async () => {
+    const missed = [];
+    await loadDemoWardrobe();
+    const pick = (c) => state.items.find((i) => i.category === c);
+    const ids = ['top', 'bottom', 'footwear'].map(pick).filter(Boolean).map((i) => i.id);
+    // Two looks, so the deck builds more than one card -- see below.
+    state.lastResult = { outfits: [
+      { itemIds: ids, title: 'A', percent: 80, pills: [] },
+      { itemIds: ids.slice().reverse(), title: 'B', percent: 70, pills: [] },
+    ] };
+    state.activeOption = 0;
+    state.tab = 'today';
+    state.layCut = true;
+    render();
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const switches = () => [...document.querySelectorAll('[data-lay-cut]')];
+    const imgs = () => [...document.querySelectorAll('img[data-lay-img]')];
+    const cutCount = () => imgs().filter((i) => i.src.startsWith('data:')).length;
+
+    if (!switches().length) return ['the lay-out offered no way to turn the cut off'];
+    const wasCut = cutCount();
+    if (!wasCut) missed.push('nothing was cut out to begin with - the test proves nothing');
+
+    // The deck builds every look, not only the visible one, so this markup
+    // appears several times over. An id here would be duplicated and only the
+    // first switch would work; the rest would look live and do nothing.
+    if (switches().length < 2) missed.push('the deck rendered only one card - the duplicate-switch case is untested');
+    switches()[switches().length - 1].click();
+    await new Promise((r) => setTimeout(r, 1500));
+    if (state.layCut) missed.push('the last switch on the page did nothing');
+    if (cutCount() !== 0) missed.push(`${cutCount()} pieces were still cut out after switching it off`);
+    if (imgs().some((i) => !i.classList.contains('fl-photo'))) {
+      missed.push('a piece was left as a bare square rather than framed as a photograph');
+    }
+    if (!/photos as taken/i.test(document.querySelector('.cut-txt')?.textContent || '')) {
+      missed.push('the switch label did not follow the setting');
+    }
+
+    // and back on again -- the lifted copies are cached, so this is where a
+    // stale cache would show as "off" refusing to turn back on
+    switches()[0].click();
+    await new Promise((r) => setTimeout(r, 2500));
+    if (!state.layCut) missed.push('the switch would not turn back on');
+    if (cutCount() !== wasCut) {
+      missed.push(`${cutCount()} pieces cut after switching back on, ${wasCut} before`);
+    }
+
+    // it is a setting, not a mood: it has to be written down
+    state.layCut = false;
+    await savePrefs();
+    const raw = await storageGet('wardrobe:prefs');
+    const stored = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    if (stored.layCut !== false) missed.push(`the setting was not saved: ${JSON.stringify(stored)}`);
+    return missed;
+  });
+  for (const m of cutMisses) failures.push(`cut switch: ${m}`);
+
+  // Written down is only half of it -- it has to be read back. Left off above,
+  // so a reload here is the real test of that. Saving a setting that never
+  // returns looks identical to saving it correctly until the next launch.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof render === 'function' && state.items.length > 0,
+    { timeout: 15000 });
+  const restored = await page.evaluate(async () => {
+    const was = state.layCut;
+    // and leave the setting as it was found, so later runs start clean
+    state.layCut = true;
+    await savePrefs();
+    return was;
+  });
+  if (restored !== false) failures.push(`cut switch: the setting did not survive a reload (came back ${restored})`);
+
   // A screen that asks you to add a piece has to let you add one. The
   // floating button is display:none on every tab but Wardrobe, so Today --
   // the tab the app opens on -- used to tell a brand new user to add pieces
