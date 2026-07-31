@@ -388,9 +388,176 @@ try {
       x.fillStyle = '#8f5f4a'; x.fillRect(150, 140, 50, 60);
     });
     if (isolateForLayout(busy)) missed.push('isolation touched a cluttered photo instead of leaving it alone');
+
+    // ---- the box you draw round a piece ----
+    // A pale piece resting on a pale desk edge that runs right across the
+    // frame -- the shape of the failure a real photograph showed, where the
+    // fill escaped out of a white trainer and along the furniture it was held
+    // over. Automatic detection has no way to know where the shoe stops. The
+    // box is exactly that missing fact, so what is under test is that drawing
+    // one removes the leak and keeps the piece.
+    const inARoom = () => mk((x) => {
+      x.fillStyle = '#c2b8a2'; x.fillRect(0, 0, 200, 200);        // the room
+      x.fillStyle = '#3a3f4d'; x.fillRect(0, 14, 54, 26);         // something dark in shot
+      x.fillStyle = '#efedea'; x.fillRect(0, 96, 200, 12);        // a desk edge, right across
+      x.fillStyle = '#f2f0ec'; x.fillRect(62, 78, 78, 44);        // the piece, resting on it
+    });
+    const kept = (r, w3) => {
+      let n = 0;
+      for (let i = 0; i < r.mask.length; i++) if (!r.mask[i]) n++;
+      return n;
+    };
+    const box = { x0: 0.28, y0: 0.35, x1: 0.72, y1: 0.62 };
+    const noBox = subjectFromCentre(inARoom());
+    const boxed = subjectFromCentre(inARoom(), box);
+    const piece = 78 * 44;
+    if (!boxed) missed.push('a box round the piece was refused outright');
+    else {
+      const w3 = 200;
+      if (boxed.mask[97 * w3 + 100]) missed.push('the box cut away the piece inside it');
+      if (!boxed.mask[10 * w3 + 10]) missed.push('the box kept the room around it');
+      if (!boxed.mask[101 * w3 + 8]) missed.push('the box let the fill escape along the desk');
+      // Nothing outside what you drew may survive. This is the promise the
+      // relaxed guards are traded against, so it has to hold exactly.
+      // The same rounding the app uses. Comparing against box.x0 * 200
+      // directly says 56 >= 56.000000000000006 is false and reports the box's
+      // own left-hand column as a leak.
+      const bx0 = Math.floor(box.x0 * 200), bx1 = Math.ceil(box.x1 * 200);
+      const by0 = Math.floor(box.y0 * 200), by1 = Math.ceil(box.y1 * 200);
+      let out = 0;
+      for (let y = 0; y < 200; y++) for (let x2 = 0; x2 < 200; x2++) {
+        const within = x2 >= bx0 && x2 < bx1 && y >= by0 && y < by1;
+        if (!within && !boxed.mask[y * w3 + x2]) out++;
+      }
+      if (out) missed.push(`${out} pixels were kept from outside the box`);
+      if (kept(boxed) > piece * 1.2) {
+        missed.push(`the box kept ${Math.round(kept(boxed) / piece * 100)}% of the piece's own area`);
+      }
+      // and it has to be an improvement on guessing, not merely different
+      if (noBox && kept(noBox) <= kept(boxed)) {
+        missed.push('the box was no tighter than the automatic reading - the test proves nothing');
+      }
+    }
+
+    // A hint that says nothing must change nothing. A box drawn round the
+    // whole frame tells us only what was already assumed, so it has to give
+    // the automatic answer back exactly.
+    //
+    // Worth knowing what this does and does not cover. Two real bugs of this
+    // shape have been fixed -- the frame's rim being sampled twice into the
+    // backdrop model once a box was present, and the seed being taken from
+    // the box's inner half rather than its middle third -- and both made a
+    // looser box give a worse answer than a tighter one. Neither is caught
+    // here. They were found on photographs and only show on one: these
+    // painted scenes have too few colours for the sampling proportions to
+    // change which clusters survive, so the models come out identical either
+    // way. What this does hold down is the structure -- that a box is a
+    // refinement of the automatic path and not a separate one.
+    const twin = () => mk((x) => {
+      x.fillStyle = '#cfc9bd'; x.fillRect(0, 0, 200, 200);
+      x.fillStyle = '#7fa8bf'; x.fillRect(0, 0, 200, 18);
+      x.fillStyle = '#232323'; x.fillRect(52, 40, 96, 118);
+    });
+    const bare = subjectFromCentre(twin());
+    const whole = subjectFromCentre(twin(), { x0: 0, y0: 0, x1: 1, y1: 1 });
+    if (!bare || !whole) missed.push('a garment on a bed was refused with or without a whole-frame box');
+    else {
+      let differ = 0;
+      for (let i = 0; i < bare.mask.length; i++) if (!!bare.mask[i] !== !!whole.mask[i]) differ++;
+      if (differ > bare.mask.length * 0.01) {
+        missed.push(`a box round the whole frame changed the answer (${differ} pixels)`);
+      }
+    }
+
     return missed;
   });
   for (const m of layMisses) failures.push(`laid out: ${m}`);
+
+  // Drawing the box is the whole feature, and it lives in the detail sheet
+  // rather than in any of the functions above. What is checked here is the
+  // interaction: that a drag stores what you drew, that the app draws it back,
+  // that a stray tap does not silently throw a good mark away, and that clear
+  // clears. The first attempt at this was a single tapped point, which stored
+  // fine and made the cut worse -- so "it stored something" is not the test,
+  // "it stored the box you drew" is.
+  const markMisses = await page.evaluate(async () => {
+    const missed = [];
+    const item = state.items[0];
+    if (!item) return ['no item to mark'];
+    delete item.cutMark;
+    openDetail(item.id);
+    const stage = document.getElementById('markStage');
+    if (!stage) return ['the detail sheet offered no way to mark the piece'];
+
+    // The stage has no height until the photo is in it. Measuring before that
+    // gives a rect of zero height, and every coordinate below comes out NaN.
+    for (let i = 0; i < 100 && stage.getBoundingClientRect().height < 1; i++) {
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    if (stage.getBoundingClientRect().height < 1) return ['the photo never appeared to mark'];
+
+    // Coordinates are read fresh each time: the sheet is rebuilt after every
+    // drag, so a rect captured once goes stale.
+    const at = (fx, fy) => {
+      const r = document.getElementById('markStage').getBoundingClientRect();
+      return {
+        clientX: r.left + r.width * fx, clientY: r.top + r.height * fy,
+        pointerId: 1, bubbles: true,
+      };
+    };
+    const drag = async (x0, y0, x1, y1) => {
+      const el = document.getElementById('markStage');
+      el.dispatchEvent(new PointerEvent('pointerdown', at(x0, y0)));
+      el.dispatchEvent(new PointerEvent('pointermove', at((x0 + x1) / 2, (y0 + y1) / 2)));
+      el.dispatchEvent(new PointerEvent('pointerup', at(x1, y1)));
+      await new Promise((res) => setTimeout(res, 400));
+    };
+
+    await drag(0.25, 0.20, 0.75, 0.80);
+    const m = state.items[0].cutMark;
+    if (!m) missed.push('a drag across the photo stored no mark');
+    else {
+      const close = (a, b) => Math.abs(a - b) < 0.03;
+      if (!(close(m.x0, 0.25) && close(m.y0, 0.20) && close(m.x1, 0.75) && close(m.y1, 0.80))) {
+        missed.push(`the stored box is not the one drawn: ${JSON.stringify(m)}`);
+      }
+      // drawn back, so a second visit shows what the first one chose
+      const drawn = document.getElementById('markBox');
+      if (!drawn || drawn.style.display === 'none' || parseFloat(drawn.style.width) < 10) {
+        missed.push('the stored box was not drawn back onto the photo');
+      }
+    }
+    // Dragged backwards -- up and to the left -- must mean the same box.
+    delete state.items[0].cutMark;
+    openDetail(item.id);
+    await new Promise((res) => setTimeout(res, 100));
+    await drag(0.75, 0.80, 0.25, 0.20);
+    const back = state.items[0].cutMark;
+    if (!back || back.x1 < back.x0 || back.y1 < back.y0) {
+      missed.push(`a box drawn bottom-right to top-left came out inside out: ${JSON.stringify(back)}`);
+    }
+
+    // A stray tap is not a box, and must not disturb the one you drew. Note
+    // "unchanged" rather than "still there": without the minimum-drag guard a
+    // tap stores a zero-sized box, which is present, useless, and has quietly
+    // replaced a good mark. Checking only that something survived passes.
+    const kept0 = JSON.stringify(state.items[0].cutMark);
+    await drag(0.5, 0.5, 0.5, 0.5);
+    if (JSON.stringify(state.items[0].cutMark) !== kept0) {
+      missed.push(`a stray tap changed the mark: ${kept0} became ${JSON.stringify(state.items[0].cutMark)}`);
+    }
+
+    const clear = document.getElementById('clearMarkBtn');
+    if (!clear) missed.push('a marked piece offered no way to clear it');
+    else {
+      clear.click();
+      await new Promise((res) => setTimeout(res, 300));
+      if (state.items[0].cutMark) missed.push('clearing the mark left it in place');
+    }
+    document.getElementById('detailOverlay').classList.remove('open');
+    return missed;
+  });
+  for (const m of markMisses) failures.push(`marking: ${m}`);
 
   // A screen that asks you to add a piece has to let you add one. The
   // floating button is display:none on every tab but Wardrobe, so Today --

@@ -119,6 +119,10 @@ thing: the outer edge of the photo. Every rule below is one the code actually
 applies. Note that your photo is never altered — these rules decide how well the
 app can *read* it, not what gets stored.
 
+None of it is compulsory. If a photo comes out badly you can draw a box round
+the piece afterwards and the app will read it from inside that — see
+**Drawing a box round a piece** below.
+
 1. **Put the piece down on one plain surface.** The app samples the frame's
    border to find the backdrop, and gives up on separating the piece when that
    border is too varied — above a variance of 46. A plain wall measures near 0; a shoe held
@@ -292,6 +296,45 @@ exactly as strict.
 A piece that could not be lifted at all is framed as a photograph — rounded,
 softly shadowed — rather than left as a bare square, so it reads as a picture of
 the thing on a table rather than a cut-out that went wrong.
+
+### Drawing a box round a piece
+
+Some photographs cannot be read automatically and no amount of tuning will
+change that. A white trainer held over a cream desk is the clearest case: the
+shoe and the furniture are the same colour, they touch, and nothing in the frame
+says where one stops. Every attempt at guessing it produced the room.
+
+So open the piece and **drag a box round it**. Everything outside the box is
+dimmed as you drag. The box is not a hint the reader weighs against other
+evidence — it is a hard boundary:
+
+- the piece is described from the box's **middle third**, so a loose box does
+  not teach the reader that the bedspread either side is cloth;
+- the backdrop is described from the frame's rim **and** everything outside the
+  box, which is the part you have just ruled out;
+- the fill cannot cross the box, so **nothing outside it can survive** — which
+  is what makes it safe to relax the guards that would otherwise refuse the
+  photo outright.
+
+The tighter the box, the better the cut, with no reversals: a box drawn round
+the whole frame gives back exactly the automatic answer, and every box tighter
+than that is at least as good. Measured on two real photographs, a snug box was
+the first thing to cut the hem of a black shirt cleanly off a bedspread, and the
+first to get a shoe out of a room at all.
+
+Drawing a box also **re-reads the colour** from inside it. A wrong cut and a
+wrong colour are usually the same mistake — when the piece could not be told
+from the room, the colours were sampled off the room too. A colour you set by
+hand is left alone; only the app's own guess is replaced. The category is never
+touched, because it is confirmed by hand before an item can be saved, and
+quietly changing an answer you gave is worse than leaving a stale one.
+
+A **single tapped point was tried first and was worse than nothing**. It says
+which object you mean but nothing about where it ends, so on the trainer the
+fill grew out through the desk exactly as before, now with the app's confidence
+behind it. A box gives location and extent in the same one gesture. A tap that
+is not a drag — under 6% of the photo in either direction — is ignored rather
+than stored, so a mis-touch cannot throw away a good mark.
 
 The transparent copy is cached for the session and never written to storage: it
 is a way of *showing* the photo, not an edit to it.
