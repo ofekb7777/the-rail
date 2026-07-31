@@ -595,6 +595,19 @@
   .bp-text.warn{color:var(--mustard);}
 
   .swap-tip{font-size:11px; color:#6b6455; margin:10px 0 2px; letter-spacing:0.2px;}
+  /* The cut-out switch sits on the cream card rather than the dark one, so it
+     needs its own colours -- the shared .switch is fine, but the label beside
+     it is written for a dark background and would be near-invisible here. */
+  .cut-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    margin:8px 0 2px;
+  }
+  .cut-row .cut-txt{font-size:11px; color:#6b6455; letter-spacing:0.2px; flex:1;}
+  .cut-row .switch{width:36px; height:20px; background:rgba(0,0,0,0.16);}
+  .cut-row .switch::after{width:14px; height:14px; background:#fffdf7;}
+  .cut-row .switch.on::after{transform:translateX(16px);}
+  .cut-row .switch:active::after{width:19px;}
+  .cut-row .switch.on:active::after{width:19px; left:-1px;}
   .fl-item[data-swap]{cursor:pointer;}
   .swap-head{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px;}
   .swap-label{font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--sage); font-weight:700;}
@@ -1089,7 +1102,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.19';
+const APP_VERSION = '2026.08.20';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1412,6 +1425,11 @@ let state = {
   update: {status:'unknown', latest:null, checkedAt:0},   /* 'current' | 'stale' | 'offline' | 'unknown' */
   showGaps: false,
   gapResult: null,
+  /* Whether the lay-out lifts pieces off their backgrounds. On by default,
+     because a lay-out of cut-outs is the point of the view -- but the cut is
+     a guess, and when it guesses wrong on a piece there has to be a way to
+     see the photograph instead of arguing with it. */
+  layCut: true,
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1508,6 +1526,9 @@ async function loadAll(){
   const prefs   = await readJson('wardrobe:prefs', {});
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
+  /* Explicitly against false: absent means a wardrobe saved before this
+     existed, which should get the cut-outs rather than be silently opted out. */
+  if(prefs.layCut === false) state.layCut = false;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now. */
@@ -1554,7 +1575,7 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    temp: state.temp, reorderHintSeen: state.reorderHintSeen
+    temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut
   });
 }
 
@@ -4221,6 +4242,20 @@ function renderOutfitResult(outfit, saved, savedIdx){
     + '<div class="stamp">'+stamp+'</div>'
     + '<h4>'+escapeHtml(outfit.title||'Your outfit')+'</h4>'
     + renderFlatLay(outfit, !saved)
+    /* Next to the lay-out rather than buried in Settings, because it is a
+       thing you judge by looking: you can see the cut is wrong on this piece,
+       and the switch is right there under it. */
+    + '<div class="cut-row">'
+    +   '<span class="cut-txt">'
+    +     (state.layCut ? 'Pieces are cut out of their photos' : 'Showing the photos as taken')
+    +   '</span>'
+    /* A class, not an id. The deck builds every look rather than only the
+       visible one, so this markup appears several times over and an id would
+       be duplicated -- with getElementById quietly wiring up the first one
+       and leaving the rest dead. */
+    +   '<button class="switch '+(state.layCut?'on':'')+'" data-lay-cut '
+    +     'aria-label="Cut pieces out of their photos"></button>'
+    + '</div>'
     + (!saved ? '<div class="swap-tip">Tap a piece to swap it for another</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
@@ -5567,6 +5602,10 @@ async function enhanceLayImages(){
       if(url && el.isConnected) el.src = url;
       else el.classList.add('fl-photo');
     };
+    /* Switched off, every piece takes the same path as one that could not be
+       lifted: framed as a photograph. Nothing is decoded or cut, so this is
+       also the fast way to draw the view. */
+    if(!state.layCut){ settle(null); continue; }
     if(_layCache.has(id)){ settle(_layCache.get(id)); continue; }
     const item = state.items.find(function(i){ return i.id===id; });
     if(!item || !item.image){ _layCache.set(id, null); settle(null); continue; }
@@ -6741,6 +6780,21 @@ function attachDynamicHandlers(){
   });
   document.querySelectorAll('[data-swap]').forEach(function(el){
     el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
+  });
+  /* Cut the pieces out of their photos, or show the photos as taken.
+     The cache of lifted copies is deliberately left alone. Switching off does
+     not consult it -- it takes the same path as a piece that could not be
+     lifted -- so nothing stale can be served from it, and keeping it means
+     switching back on is instant rather than re-cutting every photograph. */
+  document.querySelectorAll('[data-lay-cut]').forEach(function(el){
+    el.onclick = async function(e){
+      e.stopPropagation();
+      state.layCut = !state.layCut;
+      await savePrefs();
+      render();
+      toast(state.layCut ? 'Cutting pieces out of their photos'
+                         : 'Showing the photos as taken');
+    };
   });
 
   /* The way out of an empty screen. Deliberately the same two lines the
