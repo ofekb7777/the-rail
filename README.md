@@ -533,3 +533,17 @@ finger*. Those are entirely different faults.
 IndexedDB, with a localStorage fallback if it is unavailable. Photos are
 downscaled and stored as JPEG data URLs. Use **Export backup** for a portable
 JSON snapshot — that file is the only copy that outlives the browser.
+
+Because it is the only copy, the round trip is tested rather than assumed: a
+wardrobe is exported, the app is emptied, and the file is read back. The pieces,
+saved looks, wear log and plans all have to return, along with every per-item
+field — the photo, the brand, the favourite mark, the box you drew round a
+piece, and whether you asked for it to be shown as a photograph.
+
+One deliberate exception. Warmth, formality and tags are **re-inferred from the
+name on import** for anything still on the app's own guess, so a backup taken
+before a keyword was added benefits from it. Anything you corrected by hand is
+kept exactly as you set it — that is what the *auto* flag on each attribute is
+for, and the test checks it specifically, because a silent partial loss is the
+failure that matters here. Everything would look fine; only weeks later would it
+emerge that every warmth you fixed had been quietly re-guessed.

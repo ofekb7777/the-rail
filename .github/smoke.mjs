@@ -858,6 +858,94 @@ try {
   });
   for (const m of looksMisses) failures.push(`stylist: ${m}`);
 
+  // The backup file is the only copy of a wardrobe that is not in this
+  // browser's storage. It is the answer to "what if the data is cleared", to
+  // "I got a new phone", and to the README's own advice -- and nothing was
+  // testing that a file written by export can be read back by import.
+  //
+  // A silent partial loss is the failure that matters. Everything would appear
+  // to work: the wardrobe comes back, the photos are there, and only weeks
+  // later does it emerge that every warmth you corrected by hand has been
+  // quietly re-guessed, or that the boxes you drew round pieces are gone.
+  const backupMisses = await page.evaluate(async () => {
+    const missed = [];
+    const mk = (name, cat, color) => ({
+      id: name.replace(/\W/g, '') + Math.random().toString(36).slice(2, 7),
+      name, category: cat, color, warmth: 3, formality: 3,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    const tee = mk('Tee', 'top', 'white');
+    const jeans = mk('Jeans', 'bottom', 'blue');
+    const shoes = mk('Trainers', 'footwear', 'white');
+    // one piece carrying every per-item field that has been added over time,
+    // since those are exactly what a round trip is most likely to drop
+    tee.favourite = true;
+    tee.cutMark = { x0: 0.1, y0: 0.12, x1: 0.9, y1: 0.88 };
+    tee.showAsPhoto = true;
+    tee.colorAuto = false;
+    tee.brand = 'Vans';
+    tee.image = 'data:image/png;base64,iVBORw0KGgo=';
+    // and attributes corrected by hand, which import must not re-guess
+    tee.warmth = 5; tee.warmthAuto = false;
+    tee.formality = 5; tee.formalityAuto = false;
+    jeans.warmth = 1; jeans.warmthAuto = false;
+
+    const day = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return dateKey(d); };
+    state.items = [tee, jeans, shoes];
+    state.outfits = [{ itemIds: [tee.id, jeans.id, shoes.id], title: 'Saved look', percent: 80, pills: [] }];
+    state.wearLog = [{ date: day(1), itemIds: [tee.id, jeans.id, shoes.id], title: 'L' }];
+    state.plans = { [day(-2)]: { itemIds: [jeans.id, shoes.id], title: 'Planned' } };
+    const before = JSON.parse(JSON.stringify({
+      items: state.items, outfits: state.outfits, wearLog: state.wearLog, plans: state.plans,
+    }));
+
+    // exportBackup hands the file to the browser via a blob URL. Capture the
+    // blob on the way past but hand back a real URL: returning a made-up one
+    // makes the download anchor fail and logs "Not allowed to load local
+    // resource", which this suite counts -- correctly -- as an error.
+    let blob = null;
+    const realCreate = URL.createObjectURL;
+    URL.createObjectURL = function (b) { blob = b; return realCreate.call(URL, b); };
+    try { exportBackup(); } catch (e) { missed.push(`export threw "${e.message}"`); }
+    URL.createObjectURL = realCreate;
+    if (!blob) return ['export produced no file at all'];
+    const text = await blob.text();
+
+    state.items = []; state.outfits = []; state.wearLog = []; state.plans = {};
+    try {
+      await importBackup(new File([text], 'rail-backup.json', { type: 'application/json' }));
+    } catch (e) {
+      return [`import could not read the file export just wrote: "${e.message}"`];
+    }
+
+    if (state.items.length !== before.items.length) {
+      missed.push(`${before.items.length} pieces went in, ${state.items.length} came back`);
+    }
+    if (JSON.stringify(state.outfits) !== JSON.stringify(before.outfits)) missed.push('saved looks were lost');
+    if (JSON.stringify(state.wearLog) !== JSON.stringify(before.wearLog)) missed.push('the wear log was lost');
+    if (JSON.stringify(state.plans) !== JSON.stringify(before.plans)) missed.push('plans were lost');
+
+    const back = state.items.find((i) => i.id === tee.id);
+    if (!back) missed.push('the piece carrying every field did not come back');
+    else {
+      // Only the fields that must survive verbatim. warmth, formality and tags
+      // are deliberately re-inferred on import for anything still automatic --
+      // that is why the hand-corrected ones below are the interesting case.
+      for (const f of ['favourite', 'cutMark', 'showAsPhoto', 'colorAuto', 'brand', 'image', 'name', 'category', 'color']) {
+        if (JSON.stringify(back[f]) !== JSON.stringify(tee[f])) {
+          missed.push(`item.${f} did not survive the backup (${JSON.stringify(back[f])})`);
+        }
+      }
+      if (back.warmth !== 5 || back.formality !== 5) {
+        missed.push(`a hand-corrected warmth/formality was re-guessed on import (${back.warmth}/${back.formality})`);
+      }
+    }
+    const j = state.items.find((i) => i.id === jeans.id);
+    if (j && j.warmth !== 1) missed.push(`a hand-corrected warmth was re-guessed on import (${j.warmth})`);
+    return missed;
+  });
+  for (const m of backupMisses) failures.push(`backup: ${m}`);
+
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
   // the file, and its failure mode is silence: an empty list of suggestions
@@ -938,9 +1026,16 @@ try {
   });
   for (const m of gapMisses) failures.push(`gaps: ${m}`);
 
-  // Written down is only half of it -- it has to be read back. Left off above,
-  // so a reload here is the real test of that. Saving a setting that never
-  // returns looks identical to saving it correctly until the next launch.
+  // Written down is only half of it -- it has to be read back. Saving a setting
+  // that never returns looks identical to saving it correctly until the next
+  // launch.
+  //
+  // Turned off and saved right here rather than relying on an earlier block
+  // having left it that way. It did, once; then another test called something
+  // that writes prefs as a side effect, and this failed pointing at the cut
+  // switch, which was not what was wrong. A test that depends on the state
+  // another test happened to leave behind reports the wrong culprit.
+  await page.evaluate(async () => { state.layCut = false; await savePrefs(); });
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => typeof render === 'function' && state.items.length > 0,
     { timeout: 15000 });
