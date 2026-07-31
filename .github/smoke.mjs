@@ -159,6 +159,48 @@ try {
   });
   for (const m of shadowMisses) failures.push(`colour: ${m}`);
 
+  // Every colour test above uses a square PNG. A phone produces neither: it
+  // produces a tall JPEG, and the piece is a smaller share of a tall frame at
+  // the same distance. Beige on pale linen read "silver" in portrait, in
+  // landscape, and at every JPEG quality, while being correct in the square
+  // renders next to it -- so the shape of the frame was the whole difference,
+  // and nothing in the suite was looking at it.
+  const frameMisses = await page.evaluate(async () => {
+    const shot = (hex, backdrop, W, H, q) => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = backdrop; x.fillRect(0, 0, W, H);
+      x.save();
+      x.globalAlpha = 0.35; x.filter = 'blur(18px)'; x.fillStyle = '#000';
+      x.beginPath(); x.ellipse(W * 0.5, H * 0.76, W * 0.30, H * 0.07, 0, 0, 7); x.fill();
+      x.restore();
+      const S = 400, l = document.createElement('canvas');
+      l.width = l.height = S;
+      DEMO_SHAPES.top(l.getContext('2d'), hex, S, S, {});
+      const side = Math.round(Math.min(W, H) * 0.62);
+      x.drawImage(l, Math.round((W - side) / 2), Math.round((H - side) / 2), side, side);
+      const type = q ? 'image/jpeg' : 'image/png';
+      return new Promise((r) => c.toBlob((b) => r(new File([b], 's', { type })), type, q || undefined));
+    };
+    const missed = [];
+    for (const [label, W, H, q] of [
+      ['portrait 3:4', 480, 640, null],
+      ['landscape 4:3', 640, 480, null],
+      ['tall 9:16', 420, 746, null],
+      ['portrait JPEG q0.76', 480, 640, 0.76],
+      ['portrait JPEG q0.6', 480, 640, 0.6],
+    ]) {
+      for (const want of ['beige', 'navy', 'white', 'red']) {
+        const r = await processPhoto(await shot(colorByName(want).hex, '#d8d3c7', W, H, q));
+        const got = r.colors.length ? r.colors[0].name : '(nothing)';
+        if (got !== want) missed.push(`${want} in a ${label} frame read as "${got}"`);
+      }
+    }
+    return missed;
+  });
+  for (const m of frameMisses) failures.push(`colour: ${m}`);
+
   // The category guess reads the silhouette and is deliberately narrow: it
   // claims trousers and shoes and abstains on everything else. What must not
   // drift is the abstention -- a photographed jumper quietly filed as footwear
@@ -673,6 +715,66 @@ try {
     return missed;
   });
   for (const m of cutMisses) failures.push(`cut switch: ${m}`);
+
+  // One piece can opt out on its own. The switch on Today answers "I do not
+  // want cut-outs"; this answers "that one came out wrong", which is a
+  // judgement about a single photograph and must not cost the cut-outs that
+  // worked. So the test is specifically that the *other* pieces are untouched
+  // -- an opt-out that quietly turned everything into photographs would look
+  // like it was working.
+  const perPiece = await page.evaluate(async () => {
+    const missed = [];
+    state.layCut = true;
+    const pick = (c) => state.items.find((i) => i.category === c);
+    const ids = ['top', 'bottom', 'footwear'].map(pick).filter(Boolean).map((i) => i.id);
+    state.lastResult = { outfits: [{ itemIds: ids, title: 'A', percent: 80, pills: [] }] };
+    state.activeOption = 0; state.tab = 'today';
+    state.items.forEach((i) => { delete i.showAsPhoto; });
+    render();
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const cutIds = () => [...document.querySelectorAll('img[data-lay-img]')]
+      .filter((i) => i.src.startsWith('data:')).map((i) => i.getAttribute('data-lay-img'));
+    const before = cutIds();
+    // Not every demo piece can be lifted, so pick one that actually was --
+    // opting out a piece that was already a photograph proves nothing.
+    if (before.length < 2) return ['fewer than two pieces were cut out to begin with'];
+    const target = before[0];
+
+    openDetail(target);
+    await new Promise((r) => setTimeout(r, 400));
+    const btn = document.getElementById('showAsPhotoBtn');
+    if (!btn) return ['the detail sheet offered no way to show a piece as a photo'];
+    btn.click();
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const after = cutIds();
+    if (!state.items.find((i) => i.id === target).showAsPhoto) missed.push('the opt-out was not recorded');
+    if (after.includes(target)) missed.push('the piece that opted out is still cut out');
+    for (const id of before.slice(1)) {
+      if (!after.includes(id)) missed.push('opting one piece out stopped another being cut out');
+    }
+
+    // and back again
+    document.getElementById('detailOverlay').classList.remove('open');
+    openDetail(target);
+    await new Promise((r) => setTimeout(r, 400));
+    document.getElementById('showAsPhotoBtn').click();
+    await new Promise((r) => setTimeout(r, 2500));
+    if (cutIds().length !== before.length) {
+      missed.push(`turning it back on gave ${cutIds().length} cut pieces, ${before.length} before`);
+    }
+
+    // the switch on Today still wins over everything
+    document.getElementById('detailOverlay').classList.remove('open');
+    state.layCut = false;
+    render();
+    await new Promise((r) => setTimeout(r, 1500));
+    if (cutIds().length) missed.push('the Today switch no longer turns every cut-out off');
+    state.layCut = true;
+    return missed;
+  });
+  for (const m of perPiece) failures.push(`per-piece: ${m}`);
 
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in

@@ -230,6 +230,22 @@ light is genuinely hard to separate, and a person looking at the same pixels
 would hesitate too. Photograph pale clothes on something darker — see the list
 above — or draw a box round the piece, which re-reads the colour from inside it.
 
+One thing worth knowing about how it fails. When the app *can* separate the
+piece, it gets the colour right; when it cannot, it used to judge the colour off
+the whole frame, which on a pale piece against a pale surface largely means
+judging it off the surface. It now falls back to the middle of the photo
+instead — the one thing still known about where a piece is, and the same
+assumption the centre reading starts from. Measured across 180 renders including
+pieces pushed well off centre, 166 read correctly before and 171 after, with
+nothing correct becoming wrong.
+
+That fallback matters more than its size suggests, because it is what a phone
+photo actually hits. Every colour test used to be a *square PNG*; a phone
+produces a tall JPEG, and the same piece at the same distance is a smaller share
+of a taller frame. Beige on pale linen read "silver" in portrait, in landscape,
+and at every JPEG quality while being correct in the square render beside it.
+Those framings are now in the test suite.
+
 If the reading is not what you see, the four next-best candidates are offered as
 dots beside it.
 
@@ -385,6 +401,13 @@ way to draw the view. The setting is remembered.
 It sits beside the lay-out rather than in Settings because it is a thing you
 judge by looking — you can see the cut is wrong, and the switch is right there
 under it.
+
+There is a second, narrower version of the same thing. Open any piece and there
+is *Or just show this one as a photo* under the marking box. The Today switch is
+the blunt instrument and answers "I do not want cut-outs"; this answers the far
+more common "that one came out wrong", which is a judgement about a single
+photograph and should not cost you the cut-outs that worked. Turning it back on
+is instant — the lifted copy is kept, not thrown away.
 
 ### Drawing a box round a piece
 

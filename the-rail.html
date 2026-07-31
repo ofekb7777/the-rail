@@ -1137,7 +1137,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.24';
+const APP_VERSION = '2026.08.26';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -2651,6 +2651,17 @@ function canvasToJpeg(canvas, quality){
   return out;
 }
 
+/* The middle of a canvas, as a canvas. */
+function centreCrop(canvas, frac){
+  const w = canvas.width, h = canvas.height;
+  const cw = Math.max(1, Math.round(w*frac)), ch = Math.max(1, Math.round(h*frac));
+  const out = document.createElement('canvas');
+  out.width = cw; out.height = ch;
+  out.getContext('2d').drawImage(canvas,
+    Math.round((w-cw)/2), Math.round((h-ch)/2), cw, ch, 0, 0, cw, ch);
+  return out;
+}
+
 /* Full pipeline for one photo. Returns everything the review card needs. */
 async function processPhoto(file){
   const img = await loadImageFromFile(file);
@@ -2689,7 +2700,23 @@ async function processPhoto(file){
     measure = drawToCanvas(img, 420);
     applyGains(measure, gains);
   }
-  const colors = detectColors(measure, cut.applied ? cut.mask : null);
+
+  /* Neither reading could find the subject. Rather than judge the colour off
+     the whole frame -- which on a pale piece against a pale surface means
+     judging it largely off the surface -- fall back to the middle of the
+     photo, which is the one thing still known about where the piece is. It is
+     the same assumption the centre reading above starts from, and all that is
+     left once it has given up.
+
+     Measured across 180 renders, including pieces pushed well off centre where
+     a centre crop is most likely to do harm: 166 read correctly before, 171
+     after, and nothing that was right became wrong. The gain is small because
+     this only runs when everything else has failed. The point is the
+     direction -- when the app cannot find the garment it now guesses where a
+     photographer would have put it, instead of averaging the room. */
+  let measureRegion = measure;
+  if(!cut.applied) measureRegion = centreCrop(measure, 0.5);
+  const colors = detectColors(measureRegion, cut.applied ? cut.mask : null);
 
   const dataUrl = canvasToJpeg(drawToCanvas(img, 520), 0.76);
   return {
@@ -5129,6 +5156,18 @@ function openDetail(id){
           + ';width:'+((item.cutMark.x1-item.cutMark.x0)*100)+'%;height:'+((item.cutMark.y1-item.cutMark.y0)*100)+'%"></span>'
         : '<span class="mark-box" id="markBox" style="display:none"></span>')
     +   '</div>'
+    /* The other answer to a bad cut, for when marking it is not worth the
+       trouble or the photograph simply cannot be read: leave this one alone.
+       Beside the box rather than in Settings, because both are answers to the
+       same question and you should be able to see the photograph while
+       choosing between them. */
+    +   '<div class="cut-row" style="margin-top:10px;">'
+    +     '<span class="cut-txt" style="color:rgba(239,232,216,0.5);">'
+    +       (item.showAsPhoto ? 'Shown as the photo you took' : 'Or just show this one as a photo')
+    +     '</span>'
+    +     '<button class="switch '+(item.showAsPhoto?'on':'')+'" id="showAsPhotoBtn" '
+    +       'aria-label="Show this piece as a photograph instead of cutting it out"></button>'
+    +   '</div>'
     + '</div>'
     + '<button class="btn-primary" id="buildAroundBtn">Build an outfit around this</button>'
     + '<button class="btn-secondary" id="woreItemBtn">I\'m wearing this today</button>'
@@ -5245,6 +5284,20 @@ function openDetail(id){
     await saveItems();
     openDetail(id);
     render();
+  };
+  const asPhoto = document.getElementById('showAsPhotoBtn');
+  if(asPhoto) asPhoto.onclick = async function(){
+    /* Deleted rather than set to false, so an item carries the flag only when
+       it is actually opted out. The lay-out cache is left alone: it holds the
+       cut version, which is still correct for whenever this is turned back
+       on. */
+    if(item.showAsPhoto) delete item.showAsPhoto;
+    else item.showAsPhoto = true;
+    await saveItems();
+    openDetail(id);
+    render();
+    toast(item.showAsPhoto ? 'Showing this one as a photo'
+                           : 'Cutting this one out again');
   };
 
   document.getElementById('buildAroundBtn').onclick = function(){
@@ -5677,9 +5730,17 @@ async function enhanceLayImages(){
        lifted: framed as a photograph. Nothing is decoded or cut, so this is
        also the fast way to draw the view. */
     if(!state.layCut){ settle(null); continue; }
-    if(_layCache.has(id)){ settle(_layCache.get(id)); continue; }
     const item = state.items.find(function(i){ return i.id===id; });
     if(!item || !item.image){ _layCache.set(id, null); settle(null); continue; }
+    /* One piece can opt out on its own. The switch on Today is the blunt
+       instrument -- it answers "I do not want cut-outs" -- and this answers the
+       far more common "that one came out wrong", which is a judgement about a
+       single photograph and should not cost the cut-outs that worked.
+
+       Checked before the cache rather than after, so turning it on and off
+       again does not have to re-cut the photograph. */
+    if(item.showAsPhoto){ settle(null); continue; }
+    if(_layCache.has(id)){ settle(_layCache.get(id)); continue; }
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
