@@ -4,7 +4,8 @@
 choose *Add to Home Screen* for a fullscreen app that works offline.
 
 A wardrobe app that photographs your clothes, learns what goes together, and
-tells you what to wear. One HTML file. No accounts, no server, no API keys.
+tells you what to wear. One HTML file, plus two typefaces beside it. No
+accounts, no server, no API keys, and not a single request to anyone.
 
 Everything — the styling engine, the colour science, the background isolation —
 runs in your browser. Nothing about your wardrobe ever leaves your device, and
@@ -14,7 +15,9 @@ the photos you take are stored exactly as you took them.
 
 ## Running it
 
-**Just open `the-rail.html`.** Double-click it. That works.
+**Just open `the-rail.html`.** Double-click it. That works — including the
+typefaces, which sit in `fonts/` next to it and load straight off the disk.
+Keep that folder alongside the HTML if you move the file somewhere.
 
 There is one reason to prefer a local server: browsers only grant service
 workers to *secure* origins, and `file://` is not one. So if you want the app
@@ -99,18 +102,32 @@ wear history stay in your browser's storage and are never uploaded anywhere.
 
 ## What talks to the network
 
-One external reference, no API key, and nothing that is told anything about
-your wardrobe:
+**Nothing.** No external host, no API key, no account.
 
-| What | Why | If it fails |
-|---|---|---|
-| `fonts.googleapis.com` | Fraunces + Work Sans | Falls back to system fonts |
+The only request the app makes at all is to `version.json` on its own origin,
+which is how it tells you whether it is the current copy. There are no outbound
+links to anywhere; nothing is fetched to make a suggestion. How cold it is out
+is a choice you make on the Today tab — Cold, Mild or Warm — rather than
+something the app asks a weather service about behind your back.
 
-The only other request is to `version.json` on this same origin, which is how
-the app tells you whether it is the current copy. There are no outbound links
-to anywhere; nothing is fetched to make a suggestion. How cold it is out is a choice you
-make on the Today tab — Cold, Mild or Warm — rather than something the app
-asks a weather service about behind your back.
+This used to be one line short of true. Fraunces and Work Sans came from
+`fonts.googleapis.com`, and while no wardrobe data went with the request, every
+load still told Google that someone had opened the page from this address. The
+two typefaces now live in `fonts/` beside the app — three woff2 files, 110 KB,
+latin subset, under the SIL Open Font License that ships with them.
+
+That also fixed a real bug rather than only a principle. The service worker
+deliberately leaves cross-origin requests alone, so the stylesheet was never
+cached: with no signal it never arrived and the app quietly fell back to system
+fonts — the one thing a home-screen install is not supposed to do, done
+invisibly. The smoke test now measures the rendered width of a line of text
+online and offline and fails if they differ.
+
+Two things that look like they would catch that and do not, recorded because
+both were tried: `document.fonts.check('300 16px Fraunces')` answers **true**
+on a page where the stylesheet failed and nothing is in Fraunces, because
+fallback counts as being able to paint the text. Reading `font-family` off the
+element is worse — that is the CSS as written, not what the browser found.
 
 ## Photographing a piece
 

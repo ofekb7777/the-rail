@@ -33,9 +33,13 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage();
 
-  // Only the app's own failures count. The weather lookup and the webfont are
-  // third-party and the app is built to degrade without them, so a runner
-  // without network to those hosts must not turn the build red.
+  // Only the app's own failures count. The weather lookup is third-party and
+  // the app is built to degrade without it, so a runner with no route to that
+  // host must not turn the build red.
+  //
+  // The fonts used to be in that sentence too. They are served from beside the
+  // app now, which means a missing one is a 404 in the repo and does turn the
+  // build red -- correctly.
   const ours = (url) => !url || url.startsWith(BASE);
 
   page.on('pageerror', (err) => failures.push(`uncaught: ${err.message}`));
@@ -767,6 +771,116 @@ try {
     return missed;
   });
   for (const m of strays) failures.push(`categories: ${m}`);
+
+  // The typefaces are served from beside the app so that it looks the same
+  // with no signal. They used to come from Google, which the service worker
+  // leaves alone, so offline the app silently changed typeface -- the one
+  // thing a home-screen install must not do.
+  //
+  // Two traps are worth naming, because both make a broken state look fine:
+  //
+  // 1. document.fonts.check() is useless here. It answered true for
+  //    "300 16px Fraunces" on a page where the stylesheet had failed to load
+  //    and nothing was rendering in Fraunces at all -- it reports whether the
+  //    text can be painted, and fallback counts.
+  // 2. So does asking whether the element's font-family says "Fraunces". That
+  //    is the CSS as written, not what the browser could find.
+  //
+  // The only honest test is to measure: text set in Fraunces has to come out a
+  // different width from the same text in the fallback, and the same width
+  // offline as on. Measured on the version before this change, Fraunces and
+  // serif were both 481.72px -- identical, because it was serif.
+  const fontProbe = () => ({
+    faces: [...document.fonts].map((f) => `${f.family} ${f.style} ${f.status}`).sort(),
+    width: (() => {
+      const w = (fam, wt, style) => {
+        const s = document.createElement('span');
+        s.textContent = 'Handgloves 12345';
+        s.style.cssText = 'position:absolute;visibility:hidden;font-size:64px;white-space:pre'
+          + `;font-family:${fam};font-weight:${wt};font-style:${style || 'normal'}`;
+        document.body.appendChild(s);
+        const r = +s.getBoundingClientRect().width.toFixed(2);
+        s.remove();
+        return r;
+      };
+      return {
+        fraunces300: w('Fraunces', 300), fraunces600: w('Fraunces', 600),
+        frauncesItalic: w('Fraunces', 500, 'italic'),
+        work400: w("'Work Sans'", 400), work800: w("'Work Sans'", 800),
+        serif: w('serif', 400), sans: w('sans-serif', 400),
+      };
+    })(),
+  });
+
+  // Only requests that actually leave the machine count. The app makes plenty
+  // of blob: requests for its own photographs -- those are same-origin objects
+  // it created itself, and counting them reported the app as calling out to
+  // three of its own pictures.
+  const thirdParty = [];
+  page.on('request', (r) => {
+    const u = r.url();
+    if (!/^https?:\/\//.test(u)) return;
+    if (!ours(u)) thirdParty.push(u);
+  });
+
+  await page.goto(`${BASE}/the-rail.html`, { waitUntil: 'load' });
+  await page.waitForFunction(() => document.querySelector('#main')?.children.length > 0,
+    { timeout: 15000 });
+  await page.evaluate(() => document.fonts.ready);
+  const online = await page.evaluate(fontProbe);
+
+  if (online.faces.length !== 3) {
+    failures.push(`fonts: expected three faces loaded, got ${JSON.stringify(online.faces)}`);
+  }
+  if (online.faces.some((f) => !f.endsWith('loaded'))) {
+    failures.push(`fonts: a face did not load: ${JSON.stringify(online.faces)}`);
+  }
+  if (online.width.fraunces600 === online.width.serif) {
+    failures.push('fonts: Fraunces measured the same as the serif fallback, so it is the fallback');
+  }
+  if (online.width.work400 === online.width.sans) {
+    failures.push('fonts: Work Sans measured the same as the sans fallback, so it is the fallback');
+  }
+  // One file covers a weight range. If the range were wrong the browser would
+  // synthesise, and every weight would come out the same width.
+  if (online.width.fraunces300 === online.width.fraunces600) {
+    failures.push('fonts: Fraunces 300 and 600 are the same width, so the weight axis is not working');
+  }
+  if (online.width.work400 === online.width.work800) {
+    failures.push('fonts: Work Sans 400 and 800 are the same width, so the weight axis is not working');
+  }
+  if (online.width.frauncesItalic === online.width.fraunces300) {
+    failures.push('fonts: italic Fraunces measured as upright, so the italic face is not being used');
+  }
+
+  // The app is meant to reach no one. Not a privacy claim in the README any
+  // more -- a thing the build checks.
+  if (thirdParty.length) {
+    failures.push(`fonts: the app still called out to ${[...new Set(thirdParty)].join(', ')}`);
+  }
+
+  // And the point of all of it: with the network gone, the app comes up and
+  // looks the same. page.route cannot do this -- it never sees requests the
+  // service worker answers -- so the context really goes offline.
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.context().setOffline(true);
+  try {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelector('#main')?.children.length > 0,
+      { timeout: 20000 });
+    await page.evaluate(() => document.fonts.ready);
+    const offline = await page.evaluate(fontProbe);
+    if (JSON.stringify(offline.width) !== JSON.stringify(online.width)) {
+      failures.push('fonts: the app rendered differently offline'
+        + ` (online ${JSON.stringify(online.width)}, offline ${JSON.stringify(offline.width)})`);
+    }
+    if (offline.faces.some((f) => !f.endsWith('loaded'))) {
+      failures.push(`fonts: a face failed to load offline: ${JSON.stringify(offline.faces)}`);
+    }
+  } catch (e) {
+    failures.push(`offline: the app did not come up with no network (${e.message})`);
+  }
+  await page.context().setOffline(false);
 
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.
