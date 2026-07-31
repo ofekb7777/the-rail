@@ -1069,7 +1069,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.15';
+const APP_VERSION = '2026.08.16';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1847,6 +1847,234 @@ function guessCategoryFromShape(shape){
   return null;
 }
 
+/* ---------- finding the subject when there is no clean backdrop ----------
+   cutOutBackground works outward from the frame's edge, which assumes the
+   edge is all one surface. Real photographs are not like that. Measured on
+   four taken on a phone -- a shirt on a bed, three pairs of shoes held up in
+   a room -- the border varied by 73, 76, 108 and 123 against a limit of 46.
+   All four were refused, and because the mask feeds the colour reader and the
+   silhouette feeds the category guess, being refused meant the colour was
+   read off the bedspread and the category had to be typed by hand.
+
+   So when the edge is useless, work from the middle instead. People centre
+   what they are photographing; that is a far safer assumption than a plain
+   wall. Build a colour model of the middle and a colour model of the rim,
+   label every pixel by which it resembles, and keep the one connected island
+   that covers the centre.
+
+   This runs only when the border-based cut has already declined, so nothing
+   that works today changes. */
+function subjectFromCentre(canvas){
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const d = ctx.getImageData(0,0,w,h).data;
+
+  const lab = function(idx){
+    const p = idx*4;
+    return rgbToLab(d[p], d[p+1], d[p+2]);
+  };
+
+  /* Up to `k` colours describing a region. Small k on purpose: a garment is
+     one or two colours plus its shading, and more centroids only make the
+     model good at describing the background too. */
+  const model = function(pick, k){
+    const cent = [];
+    pick(function(idx){
+      const c = lab(idx);
+      for(let i=0;i<cent.length;i++){
+        if(labDist(c, cent[i].lab) < 14){
+          const e = cent[i], n = e.n + 1;
+          e.lab = {L:(e.lab.L*e.n + c.L)/n, a:(e.lab.a*e.n + c.a)/n, b:(e.lab.b*e.n + c.b)/n};
+          e.n = n;
+          return;
+        }
+      }
+      if(cent.length < k) cent.push({lab:c, n:1});
+    });
+    let total = 0;
+    cent.forEach(function(c){ total += c.n; });
+    /* A cluster that barely appeared is noise, not a surface. */
+    return cent.filter(function(c){ return c.n/total > 0.08; });
+  };
+
+  const step = Math.max(1, Math.round(Math.min(w,h)/110));
+
+  /* The middle third, where the thing you photographed almost certainly is. */
+  const cx0 = Math.floor(w*0.33), cx1 = Math.ceil(w*0.67);
+  const cy0 = Math.floor(h*0.33), cy1 = Math.ceil(h*0.67);
+  const fore = model(function(emit){
+    for(let y=cy0; y<cy1; y+=step) for(let x=cx0; x<cx1; x+=step) emit(y*w+x);
+  }, 3);
+
+  /* The outer tenth, which is whatever the thing was lying on or held over. */
+  const band = Math.max(2, Math.round(Math.min(w,h)*0.10));
+  const back = model(function(emit){
+    for(let y=0; y<h; y+=step){
+      for(let x=0; x<band; x+=step) emit(y*w+x);
+      for(let x=Math.max(band, w-band); x<w; x+=step) emit(y*w+x);
+    }
+    for(let x=band; x<w-band; x+=step){
+      for(let y=0; y<band; y+=step) emit(y*w+x);
+      for(let y=Math.max(band, h-band); y<h; y+=step) emit(y*w+x);
+    }
+  }, 4);
+
+  if(!fore.length || !back.length) return null;
+
+  const near = function(c, set){
+    let best = Infinity;
+    for(let i=0;i<set.length;i++){
+      const dd = labDist(c, set[i].lab);
+      if(dd < best) best = dd;
+    }
+    return best;
+  };
+
+  /* If the middle and the rim are the same colour there is nothing here to
+     separate -- a white shirt on a white sweep -- and guessing would carve a
+     hole in the garment. */
+  let apart = 0;
+  fore.forEach(function(f){ apart = Math.max(apart, near(f.lab, back)); });
+  if(apart < 12) return null;
+
+  /* Distance from the middle counts against a pixel. Without it, a white shoe
+     on a white desk takes the desk with it -- the furniture matches the shoe
+     perfectly and there is nothing in colour alone to separate them. Being
+     far from the centre is the evidence that a matching pixel is not part of
+     what you photographed. */
+  const cxp = w/2, cyp = h/2;
+  const maxR = Math.sqrt(cxp*cxp + cyp*cyp);
+  const isFore = new Uint8Array(w*h);
+  for(let idx=0; idx<w*h; idx++){
+    const x = idx % w, y = (idx-x)/w;
+    const c = lab(idx);
+    const df = near(c, fore), db = near(c, back);
+    const r = Math.sqrt((x-cxp)*(x-cxp) + (y-cyp)*(y-cyp)) / maxR;
+    /* Nothing at the centre, rising to a real handicap at the corners. */
+    const pull = r * r * 26;
+    if(df + pull < db - 2) isFore[idx] = 1;
+  }
+
+  /* Keep only the island that actually covers the middle. Everything else
+     that happens to match -- a second shoe out of frame, a shadow, a sleeve
+     of the person holding it -- is dropped. */
+  const seenPix = new Uint8Array(w*h);
+  const label = new Uint8Array(w*h);
+  const cxi = Math.floor(w/2), cyi = Math.floor(h/2);
+  let best = null;
+  const centreBox = function(x,y){ return x>=cx0 && x<cx1 && y>=cy0 && y<cy1; };
+
+  for(let sy=cy0; sy<cy1; sy+=step){
+    for(let sx=cx0; sx<cx1; sx+=step){
+      const start = sy*w+sx;
+      if(!isFore[start] || label[start]) continue;
+      let area = 0, x0=w, y0=h, x1=-1, y1=-1, centreHits = 0;
+      const stack = [start];
+      label[start] = 1;
+      while(stack.length){
+        const idx = stack.pop();
+        const x = idx % w, y = (idx-x)/w;
+        area++;
+        if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+        if(centreBox(x,y)) centreHits++;
+        if(x>0   && isFore[idx-1] && !label[idx-1]){ label[idx-1]=1; stack.push(idx-1); }
+        if(x<w-1 && isFore[idx+1] && !label[idx+1]){ label[idx+1]=1; stack.push(idx+1); }
+        if(y>0   && isFore[idx-w] && !label[idx-w]){ label[idx-w]=1; stack.push(idx-w); }
+        if(y<h-1 && isFore[idx+w] && !label[idx+w]){ label[idx+w]=1; stack.push(idx+w); }
+      }
+      if(!best || centreHits > best.centreHits) best = {start:start, area:area, x0:x0,y0:y0,x1:x1,y1:y1, centreHits:centreHits};
+    }
+  }
+  if(!best) return null;
+  /* Too small to be the thing you photographed, or so large it has swallowed
+     the room along with it. */
+  const frac = best.area/(w*h);
+  if(frac < 0.02 || frac > 0.92) return null;
+
+  /* A garment lies within the frame; a room fills it. If the island runs
+     along the edge on more than one side it is furniture, not the piece --
+     which is exactly how a white shoe on a white desk came back as the desk.
+     Better to give up and leave the photo alone than to name it after a wall. */
+  let edgeHits = 0, edgeTotal = 0;
+  const touches = function(x,y){ return label[y*w+x] === 1; };
+  for(let x=0; x<w; x++){
+    edgeTotal += 2;
+    if(touches(x,0)) edgeHits++;
+    if(touches(x,h-1)) edgeHits++;
+  }
+  for(let y=0; y<h; y++){
+    edgeTotal += 2;
+    if(touches(0,y)) edgeHits++;
+    if(touches(w-1,y)) edgeHits++;
+  }
+  if(edgeHits/edgeTotal > 0.22) return null;
+
+  /* How much of its own bounding box the island fills. A garment lying down
+     is a solid shape and fills most of it; a fragment of shoe, a band of desk
+     edge, or a shoelace caught on its own is a thin scrap that does not.
+     Measured on real photographs: a shirt on a bed came out at 0.58, while
+     three shoes held up in a room gave 0.38, 0.30 and 0.28 -- the second of
+     those being a length of furniture rather than the shoe at all.
+
+     So this is where the method admits what it is good for. A piece put down
+     and photographed gets read even on a cluttered bed. A piece held in the
+     hand against a room does not, and is left alone rather than guessed at,
+     because naming a garment after a desk is worse than not naming it. */
+  const fillRatio = best.area / Math.max(1, (best.x1-best.x0+1)*(best.y1-best.y0+1));
+  if(fillRatio < 0.48) return null;
+
+  /* Re-walk the winning island to mark it, since the labelling above cannot
+     tell the islands apart afterwards. */
+  const mine = new Uint8Array(w*h);
+  const stack2 = [best.start];
+  mine[best.start] = 1;
+  while(stack2.length){
+    const idx = stack2.pop();
+    const x = idx % w, y = (idx-x)/w;
+    if(x>0   && isFore[idx-1] && !mine[idx-1]){ mine[idx-1]=1; stack2.push(idx-1); }
+    if(x<w-1 && isFore[idx+1] && !mine[idx+1]){ mine[idx+1]=1; stack2.push(idx+1); }
+    if(y>0   && isFore[idx-w] && !mine[idx-w]){ mine[idx-w]=1; stack2.push(idx-w); }
+    if(y<h-1 && isFore[idx+w] && !mine[idx+w]){ mine[idx+w]=1; stack2.push(idx+w); }
+  }
+
+  /* A logo, a button, a highlight on a shoe: pockets of "background" wholly
+     inside the garment. Anything enclosed belongs to the piece. */
+  const outside = new Uint8Array(w*h);
+  const q = [];
+  for(let x=0;x<w;x++){ q.push(x); q.push((h-1)*w+x); }
+  for(let y=0;y<h;y++){ q.push(y*w); q.push(y*w+w-1); }
+  while(q.length){
+    const idx = q.pop();
+    if(idx<0 || idx>=w*h || outside[idx] || mine[idx]) continue;
+    outside[idx] = 1;
+    const x = idx % w, y = (idx-x)/w;
+    if(x>0) q.push(idx-1);
+    if(x<w-1) q.push(idx+1);
+    if(y>0) q.push(idx-w);
+    if(y<h-1) q.push(idx+w);
+  }
+
+  /* The convention everywhere else in this file is that the mask marks
+     background, so that is what is handed back. */
+  const mask = new Uint8Array(w*h);
+  let subjectArea = 0;
+  for(let idx=0; idx<w*h; idx++){
+    const subject = mine[idx] || !outside[idx];
+    if(subject) subjectArea++;
+    else mask[idx] = 1;
+  }
+
+  return {
+    mask: mask,
+    shape: {
+      area: subjectArea/(w*h),
+      aspect: (best.y1-best.y0+1) / Math.max(1, best.x1-best.x0+1),
+      midY: ((best.y0+best.y1)/2) / h,
+      fill: best.area / Math.max(1, (best.x1-best.x0+1)*(best.y1-best.y0+1))
+    }
+  };
+}
+
 /* ---------- white balance ----------
    Every colour judgement below assumes the photo was lit by something close to
    daylight. Indoors it never is: a warm bulb multiplies the whole frame toward
@@ -2185,6 +2413,15 @@ async function processPhoto(file){
   let cut = {applied:false};
   try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
   catch(e){ console.warn('backdrop read failed', e); }
+
+  /* The edge told us nothing -- a bed, a desk, a hand in shot. Look from the
+     middle out instead, which is where the thing you photographed is. */
+  if(!cut.applied){
+    try{
+      const mid = subjectFromCentre(drawToCanvas(img, 420));
+      if(mid) cut = {applied:true, mask:mid.mask, shape:mid.shape, viaCentre:true};
+    }catch(e){ console.warn('centre read failed', e); }
+  }
 
   /* Colour is judged on a white-balanced copy. The mask lines up because both
      canvases come from the same image at the same size. */
@@ -5029,6 +5266,24 @@ function addStickerOutline(canvas, px){
   return out;
 }
 
+/* Both ways of separating a piece from what it was photographed on, in the
+   order they are worth trying. The edge first, because when the backdrop
+   really is one surface that is the more exact of the two; the middle after,
+   for the photographs people actually take -- on a bed, on a rug, on a desk.
+   One function so the app and its tests cannot drift apart on which is which. */
+function liftForLayout(canvas){
+  if(isolateForLayout(canvas)) return true;
+  const mid = subjectFromCentre(canvas);
+  if(!mid) return false;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  for(let i=0; i<mid.mask.length; i++){
+    if(mid.mask[i]) im.data[i*4+3] = 0;
+  }
+  ctx.putImageData(im, 0, 0);
+  return true;
+}
+
 /* Swaps in the transparent copy once it is ready. Synchronous render puts the
    ordinary photo up first, so the lay-out is never blank while this runs. */
 async function enhanceLayImages(){
@@ -5050,7 +5305,7 @@ async function enhanceLayImages(){
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
-      const url = isolateForLayout(c)
+      const url = liftForLayout(c)
         ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png')
         : null;
       _layCache.set(id, url);
