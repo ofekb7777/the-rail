@@ -776,6 +776,88 @@ try {
   });
   for (const m of perPiece) failures.push(`per-piece: ${m}`);
 
+  // A look is head to foot. When the wardrobe holds none of a category the
+  // stylist builds without it rather than refusing, which is right -- a shirt
+  // and jeans is still useful before you have photographed your shoes. What
+  // was wrong was saying nothing: you got a card with a title and a percentage
+  // fit and no shoes on it, which reads as a finished answer rather than the
+  // best available one.
+  //
+  // Also under test here: that the stylist keeps its own promises when the
+  // wardrobe is awkward. Every look it returns must be made of pieces that
+  // exist, must not wear two tops at once, and must not use one piece twice --
+  // whatever it has been given to work with.
+  const looksMisses = await page.evaluate(async () => {
+    const mk = (name, cat, color, warm, form) => ({
+      id: name.replace(/\W/g, '') + Math.random().toString(36).slice(2, 7),
+      name, category: cat, color, warmth: warm, formality: form,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    const missed = [];
+    const beds = {
+      'no shoes': [mk('Tee', 'top', 'white', 2, 2), mk('Jeans', 'bottom', 'blue', 3, 2),
+        mk('Jumper', 'top', 'grey', 4, 2)],
+      'no bottoms': [mk('Tee', 'top', 'white', 2, 2), mk('Boots', 'footwear', 'black', 4, 3),
+        mk('Jumper', 'top', 'grey', 4, 2)],
+      complete: [mk('Tee', 'top', 'white', 2, 2), mk('Jeans', 'bottom', 'blue', 3, 2),
+        mk('Trainers', 'footwear', 'white', 2, 2)],
+    };
+    for (const [label, items] of Object.entries(beds)) {
+      state.items = items; state.wearLog = []; state.outfits = []; state.anchorId = null;
+      const res = generateLooks({ occasion: 'Everyday', temp: 'mild', count: 1 });
+      if (!res.length) { missed.push(`${label}: the stylist produced nothing`); continue; }
+      state.lastResult = { outfits: res };
+      state.activeOption = 0; state.tab = 'today';
+      render();
+      await new Promise((r) => setTimeout(r, 300));
+      const note = document.querySelector('.incomplete-note');
+      const text = note ? note.textContent : '';
+      if (label === 'complete') {
+        if (note) missed.push(`a complete look was flagged as incomplete: "${text.trim()}"`);
+      } else {
+        const want = label === 'no shoes' ? 'shoes' : 'bottoms';
+        if (!note) missed.push(`${label}: the look was shown with no mention that it is incomplete`);
+        else if (!text.includes(want)) missed.push(`${label}: the note does not mention ${want}: "${text.trim()}"`);
+        // and it has to offer the way out, since the fix is adding pieces
+        else if (!note.querySelector('[data-do="add"]')) {
+          missed.push(`${label}: the note says a category is empty but offers no way to add one`);
+        }
+      }
+    }
+    // the stylist's own rules, on wardrobes shaped awkwardly
+    const awkward = {
+      'all formal': [mk('Dress shirt', 'top', 'white', 2, 5), mk('Suit trousers', 'bottom', 'charcoal', 3, 5),
+        mk('Oxfords', 'footwear', 'black', 3, 5)],
+      'all one colour': [mk('Black tee', 'top', 'black', 2, 2), mk('Black jeans', 'bottom', 'black', 3, 2),
+        mk('Black boots', 'footwear', 'black', 4, 3)],
+      'lopsided': [...Array.from({ length: 12 }, (_, i) => mk('Top ' + i, 'top', ['white', 'navy', 'grey'][i % 3], 2, 2)),
+        mk('Jeans', 'bottom', 'blue', 3, 2), mk('Trainers', 'footwear', 'white', 2, 2)],
+    };
+    for (const [label, items] of Object.entries(awkward)) {
+      state.items = items; state.wearLog = []; state.outfits = []; state.anchorId = null;
+      for (const occ of OCCASIONS) {
+        for (const b of TEMP_BANDS) {
+          let res;
+          try { res = generateLooks({ occasion: occ, temp: b.v, count: 3 }); }
+          catch (e) { missed.push(`${label} ${occ}/${b.v}: threw "${e.message}"`); continue; }
+          for (const o of res) {
+            const its = o.itemIds.map((id) => state.items.find((i) => i.id === id));
+            if (its.some((i) => !i)) { missed.push(`${label} ${occ}/${b.v}: references a piece not in the wardrobe`); continue; }
+            if (new Set(o.itemIds).size !== o.itemIds.length) missed.push(`${label} ${occ}/${b.v}: uses the same piece twice`);
+            const cats = its.map((i) => i.category).filter((c) => c !== 'accessory');
+            const dupe = cats.find((c, i) => cats.indexOf(c) !== i);
+            if (dupe) missed.push(`${label} ${occ}/${b.v}: wears two ${dupe}s at once`);
+            if (o.percent != null && (o.percent < 0 || o.percent > 100)) {
+              missed.push(`${label} ${occ}/${b.v}: scored ${o.percent}`);
+            }
+          }
+        }
+      }
+    }
+    return [...new Set(missed)];
+  });
+  for (const m of looksMisses) failures.push(`stylist: ${m}`);
+
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
   // the file, and its failure mode is silence: an empty list of suggestions

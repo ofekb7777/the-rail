@@ -299,6 +299,27 @@ There is no language model here. Outfits are scored on five axes:
 Attributes are inferred from item names with a keyword table, so "black wool
 overcoat" is understood as formal, warm, and outerwear without you tagging it.
 
+### When a look cannot be complete
+
+A look is head to foot: something on top, something on the bottom, something on
+your feet. If your wardrobe holds none of a category, the stylist builds without
+it rather than refusing — a shirt and jeans is genuinely useful before you have
+photographed your shoes.
+
+What it used to do was say nothing about it. You pressed *What should I wear?*
+with no shoes logged and got a card with a title, a percentage fit and no shoes
+on it, which reads as a finished answer rather than the best available one. It
+now says so on the card, with a way to add the missing pieces.
+
+Sixty looks were generated across every occasion and temperature to check the
+stylist keeps its own promises, and then again on wardrobes shaped awkwardly —
+three pieces, no shoes, all formal, all one colour, twelve tops and one pair of
+jeans. No look ever referenced a piece that did not exist, wore two tops at
+once, used the same piece twice, or scored outside 0–100. Cold-weather looks
+came out warmer than warm-weather ones for every occasion, Work dressier than
+Everyday, and Sport more casual than both — which are the profiles' own claims,
+now checked rather than assumed.
+
 **What am I missing?** counts how many workable outfits your wardrobe can
 already produce, then works out which single unowned piece would add the most.
 
