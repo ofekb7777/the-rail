@@ -33,9 +33,13 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage();
 
-  // Only the app's own failures count. The weather lookup and the webfont are
-  // third-party and the app is built to degrade without them, so a runner
-  // without network to those hosts must not turn the build red.
+  // Only the app's own failures count. The weather lookup is third-party and
+  // the app is built to degrade without it, so a runner with no route to that
+  // host must not turn the build red.
+  //
+  // The fonts used to be in that sentence too. They are served from beside the
+  // app now, which means a missing one is a 404 in the repo and does turn the
+  // build red -- correctly.
   const ours = (url) => !url || url.startsWith(BASE);
 
   page.on('pageerror', (err) => failures.push(`uncaught: ${err.message}`));
@@ -105,6 +109,55 @@ try {
     return missed;
   });
   for (const m of colourMisses) failures.push(`colour: ${m}`);
+
+  // Pale clothes on a pale surface with a shadow under them. The four bold
+  // hues above never caught this: a white shirt photographed on a white sheet
+  // came back *grey*, and so did silver and beige, because the flood ate the
+  // garment and left the shadow standing -- so the colour was read off the
+  // shadow. Neutrals are most of a wardrobe, and "your white shirt is grey" is
+  // the kind of wrong answer that discredits everything built on it.
+  const shadowMisses = await page.evaluate(async () => {
+    const shot = (hex, backdrop) => {
+      const W = 560, c = document.createElement('canvas');
+      c.width = c.height = W;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = backdrop; x.fillRect(0, 0, W, W);
+      // a soft shadow cast onto the surface, clear of where the piece sits
+      x.save();
+      x.globalAlpha = 0.35; x.filter = 'blur(18px)'; x.fillStyle = '#000';
+      x.beginPath(); x.ellipse(W * 0.5, W * 0.76, W * 0.34, W * 0.09, 0, 0, 7); x.fill();
+      x.restore();
+      const S = 400, l = document.createElement('canvas');
+      l.width = l.height = S;
+      DEMO_SHAPES.top(l.getContext('2d'), hex, S, S, {});
+      const side = Math.round(W * 0.6);
+      x.drawImage(l, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
+      return new Promise((r) => c.toBlob((b) => r(new File([b], 's.png', { type: 'image/png' })), 'image/png'));
+    };
+    const missed = [];
+    for (const [want, backdrop, where] of [
+      ['white', '#f4f4f2', 'a white sheet'],
+      ['white', '#d8d3c7', 'pale linen'],
+      ['silver', '#d8d3c7', 'pale linen'],
+      ['beige', '#d8d3c7', 'pale linen'],
+      ['silver', '#f4f4f2', 'a white sheet'],
+      // Cream on white is what pins the shadow rule's tolerance down. Cream
+      // really is white slightly dimmed, so a loose rule eats it as shadow and
+      // the shirt comes back white -- which is how a fix for one neutral turns
+      // into a failure on the next one along. Measured: it fails at 18 and
+      // passes at 11.
+      ['cream', '#f4f4f2', 'a white sheet'],
+      // and the other end, which must not regress while fixing the pale one
+      ['black', '#d8d3c7', 'pale linen'],
+      ['navy', '#f4f4f2', 'a white sheet'],
+    ]) {
+      const r = await processPhoto(await shot(colorByName(want).hex, backdrop));
+      const got = r.colors.length ? r.colors[0].name : '(nothing)';
+      if (got !== want) missed.push(`${want} on ${where} with a shadow read as "${got}"`);
+    }
+    return missed;
+  });
+  for (const m of shadowMisses) failures.push(`colour: ${m}`);
 
   // The category guess reads the silhouette and is deliberately narrow: it
   // claims trousers and shoes and abstains on everything else. What must not
@@ -621,6 +674,86 @@ try {
   });
   for (const m of cutMisses) failures.push(`cut switch: ${m}`);
 
+  // "What am I missing?" counts what the wardrobe can make, then works out
+  // which single piece would add the most. It is the largest untested thing in
+  // the file, and its failure mode is silence: an empty list of suggestions
+  // renders as an empty panel and looks like a considered answer rather than a
+  // broken one. So the test is that it produces advice at every size, not that
+  // the advice is any particular thing.
+  const gapMisses = await page.evaluate(async () => {
+    const missed = [];
+    const mk = (name, cat, color, warm, form) => ({
+      id: name.replace(/\s/g, '') + Math.random().toString(36).slice(2, 8),
+      name, category: cat, color, warmth: warm, formality: form,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    // Three is the smallest wardrobe the button will open on -- below that it
+    // refuses with a toast rather than analysing, so that is where to start.
+    const beds = {
+      'three pieces': [
+        mk('White tee', 'top', 'white', 2, 2),
+        mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('White trainers', 'footwear', 'white', 2, 2),
+      ],
+      'seven pieces': [
+        mk('White tee', 'top', 'white', 2, 2), mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('White trainers', 'footwear', 'white', 2, 2), mk('Black tee', 'top', 'black', 2, 2),
+        mk('Grey jumper', 'top', 'grey', 4, 2), mk('Black chinos', 'bottom', 'black', 3, 3),
+        mk('Brown boots', 'footwear', 'brown', 4, 3),
+      ],
+      // everything one colour, and nothing to put on your feet: the two shapes
+      // most likely to leave the scorer with nothing positive to say.
+      // Named the way a person would name them. That matters here: the
+      // "do not recommend what they already own" rule works on the words in
+      // the name, so a fixture of six things called "Black thing 3" defeats it
+      // and fails this test for a reason no real wardrobe would produce.
+      'all one colour': [
+        mk('Black tee', 'top', 'black', 2, 2), mk('Black jeans', 'bottom', 'black', 3, 2),
+        mk('Black boots', 'footwear', 'black', 4, 3), mk('Black hoodie', 'top', 'black', 3, 1),
+        mk('Black trousers', 'bottom', 'black', 3, 3), mk('Black trainers', 'footwear', 'black', 2, 1),
+      ],
+      'no shoes': [
+        mk('White tee', 'top', 'white', 2, 2), mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('Grey jumper', 'top', 'grey', 4, 2),
+      ],
+    };
+    for (const [label, items] of Object.entries(beds)) {
+      state.items = items;
+      let g;
+      try { g = analyseGaps(); }
+      catch (e) { missed.push(`${label}: analysis threw "${e.message}"`); continue; }
+      if (!g.gaps || !g.gaps.length) missed.push(`${label}: no suggestions at all`);
+      if (!g.summary) missed.push(`${label}: no summary line`);
+      // A suggestion with no reason is worse than none: the panel exists to
+      // explain itself, and "buy a grey jumper" unexplained is a horoscope.
+      (g.gaps || []).forEach((x) => {
+        if (!x.item) missed.push(`${label}: a suggestion with no name`);
+        if (!x.why) missed.push(`${label}: "${x.item}" was suggested with no reason`);
+        if (typeof x.unlocks !== 'number') missed.push(`${label}: "${x.item}" unlocks nothing countable`);
+      });
+      // Recommending what you already own is the fastest way to lose trust.
+      const owned = new Set(items.map((i) => i.category + '|' + i.color));
+      const dupe = (g.gaps || []).find((x) => owned.has(x.category + '|' + x.color)
+        && items.some((i) => i.category === x.category && i.color === x.color
+          && x.item.toLowerCase().split(/\s+/).filter((w) => w.length > 3)
+            .some((w) => i.name.toLowerCase().includes(w))));
+      if (dupe) missed.push(`${label}: suggested "${dupe.item}" which is already owned`);
+    }
+    // "no shoes" must be named as a blocker, not left to the suggestions --
+    // you cannot dress at all, and that is a different statement from advice.
+    state.items = beds['no shoes'];
+    const shoeless = analyseGaps();
+    if (!shoeless.blockers.length) missed.push('a wardrobe with no shoes reported nothing you cannot dress for');
+
+    // and on a real wardrobe it must still say something useful
+    await loadDemoWardrobe();
+    const demo = analyseGaps();
+    if (!demo.gaps.length) missed.push('the demo wardrobe produced no suggestions');
+    if (!(demo.baseCount > 0)) missed.push('the demo wardrobe counted no workable combinations');
+    return missed;
+  });
+  for (const m of gapMisses) failures.push(`gaps: ${m}`);
+
   // Written down is only half of it -- it has to be read back. Left off above,
   // so a reload here is the real test of that. Saving a setting that never
   // returns looks identical to saving it correctly until the next launch.
@@ -687,6 +820,116 @@ try {
     return missed;
   });
   for (const m of strays) failures.push(`categories: ${m}`);
+
+  // The typefaces are served from beside the app so that it looks the same
+  // with no signal. They used to come from Google, which the service worker
+  // leaves alone, so offline the app silently changed typeface -- the one
+  // thing a home-screen install must not do.
+  //
+  // Two traps are worth naming, because both make a broken state look fine:
+  //
+  // 1. document.fonts.check() is useless here. It answered true for
+  //    "300 16px Fraunces" on a page where the stylesheet had failed to load
+  //    and nothing was rendering in Fraunces at all -- it reports whether the
+  //    text can be painted, and fallback counts.
+  // 2. So does asking whether the element's font-family says "Fraunces". That
+  //    is the CSS as written, not what the browser could find.
+  //
+  // The only honest test is to measure: text set in Fraunces has to come out a
+  // different width from the same text in the fallback, and the same width
+  // offline as on. Measured on the version before this change, Fraunces and
+  // serif were both 481.72px -- identical, because it was serif.
+  const fontProbe = () => ({
+    faces: [...document.fonts].map((f) => `${f.family} ${f.style} ${f.status}`).sort(),
+    width: (() => {
+      const w = (fam, wt, style) => {
+        const s = document.createElement('span');
+        s.textContent = 'Handgloves 12345';
+        s.style.cssText = 'position:absolute;visibility:hidden;font-size:64px;white-space:pre'
+          + `;font-family:${fam};font-weight:${wt};font-style:${style || 'normal'}`;
+        document.body.appendChild(s);
+        const r = +s.getBoundingClientRect().width.toFixed(2);
+        s.remove();
+        return r;
+      };
+      return {
+        fraunces300: w('Fraunces', 300), fraunces600: w('Fraunces', 600),
+        frauncesItalic: w('Fraunces', 500, 'italic'),
+        work400: w("'Work Sans'", 400), work800: w("'Work Sans'", 800),
+        serif: w('serif', 400), sans: w('sans-serif', 400),
+      };
+    })(),
+  });
+
+  // Only requests that actually leave the machine count. The app makes plenty
+  // of blob: requests for its own photographs -- those are same-origin objects
+  // it created itself, and counting them reported the app as calling out to
+  // three of its own pictures.
+  const thirdParty = [];
+  page.on('request', (r) => {
+    const u = r.url();
+    if (!/^https?:\/\//.test(u)) return;
+    if (!ours(u)) thirdParty.push(u);
+  });
+
+  await page.goto(`${BASE}/the-rail.html`, { waitUntil: 'load' });
+  await page.waitForFunction(() => document.querySelector('#main')?.children.length > 0,
+    { timeout: 15000 });
+  await page.evaluate(() => document.fonts.ready);
+  const online = await page.evaluate(fontProbe);
+
+  if (online.faces.length !== 3) {
+    failures.push(`fonts: expected three faces loaded, got ${JSON.stringify(online.faces)}`);
+  }
+  if (online.faces.some((f) => !f.endsWith('loaded'))) {
+    failures.push(`fonts: a face did not load: ${JSON.stringify(online.faces)}`);
+  }
+  if (online.width.fraunces600 === online.width.serif) {
+    failures.push('fonts: Fraunces measured the same as the serif fallback, so it is the fallback');
+  }
+  if (online.width.work400 === online.width.sans) {
+    failures.push('fonts: Work Sans measured the same as the sans fallback, so it is the fallback');
+  }
+  // One file covers a weight range. If the range were wrong the browser would
+  // synthesise, and every weight would come out the same width.
+  if (online.width.fraunces300 === online.width.fraunces600) {
+    failures.push('fonts: Fraunces 300 and 600 are the same width, so the weight axis is not working');
+  }
+  if (online.width.work400 === online.width.work800) {
+    failures.push('fonts: Work Sans 400 and 800 are the same width, so the weight axis is not working');
+  }
+  if (online.width.frauncesItalic === online.width.fraunces300) {
+    failures.push('fonts: italic Fraunces measured as upright, so the italic face is not being used');
+  }
+
+  // The app is meant to reach no one. Not a privacy claim in the README any
+  // more -- a thing the build checks.
+  if (thirdParty.length) {
+    failures.push(`fonts: the app still called out to ${[...new Set(thirdParty)].join(', ')}`);
+  }
+
+  // And the point of all of it: with the network gone, the app comes up and
+  // looks the same. page.route cannot do this -- it never sees requests the
+  // service worker answers -- so the context really goes offline.
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.context().setOffline(true);
+  try {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelector('#main')?.children.length > 0,
+      { timeout: 20000 });
+    await page.evaluate(() => document.fonts.ready);
+    const offline = await page.evaluate(fontProbe);
+    if (JSON.stringify(offline.width) !== JSON.stringify(online.width)) {
+      failures.push('fonts: the app rendered differently offline'
+        + ` (online ${JSON.stringify(online.width)}, offline ${JSON.stringify(offline.width)})`);
+    }
+    if (offline.faces.some((f) => !f.endsWith('loaded'))) {
+      failures.push(`fonts: a face failed to load offline: ${JSON.stringify(offline.faces)}`);
+    }
+  } catch (e) {
+    failures.push(`offline: the app did not come up with no network (${e.message})`);
+  }
+  await page.context().setOffline(false);
 
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.

@@ -1,4 +1,4 @@
 {
-  "version": "2026.08.20",
+  "version": "2026.08.24",
   "note": "The version THE RAIL checks itself against. Must match APP_VERSION in the-rail.html and the cache name in sw.js; the smoke workflow fails the build if they drift."
 }

@@ -4,7 +4,8 @@
 choose *Add to Home Screen* for a fullscreen app that works offline.
 
 A wardrobe app that photographs your clothes, learns what goes together, and
-tells you what to wear. One HTML file. No accounts, no server, no API keys.
+tells you what to wear. One HTML file, plus two typefaces beside it. No
+accounts, no server, no API keys, and not a single request to anyone.
 
 Everything — the styling engine, the colour science, the background isolation —
 runs in your browser. Nothing about your wardrobe ever leaves your device, and
@@ -14,7 +15,9 @@ the photos you take are stored exactly as you took them.
 
 ## Running it
 
-**Just open `the-rail.html`.** Double-click it. That works.
+**Just open `the-rail.html`.** Double-click it. That works — including the
+typefaces, which sit in `fonts/` next to it and load straight off the disk.
+Keep that folder alongside the HTML if you move the file somewhere.
 
 There is one reason to prefer a local server: browsers only grant service
 workers to *secure* origins, and `file://` is not one. So if you want the app
@@ -99,18 +102,32 @@ wear history stay in your browser's storage and are never uploaded anywhere.
 
 ## What talks to the network
 
-One external reference, no API key, and nothing that is told anything about
-your wardrobe:
+**Nothing.** No external host, no API key, no account.
 
-| What | Why | If it fails |
-|---|---|---|
-| `fonts.googleapis.com` | Fraunces + Work Sans | Falls back to system fonts |
+The only request the app makes at all is to `version.json` on its own origin,
+which is how it tells you whether it is the current copy. There are no outbound
+links to anywhere; nothing is fetched to make a suggestion. How cold it is out
+is a choice you make on the Today tab — Cold, Mild or Warm — rather than
+something the app asks a weather service about behind your back.
 
-The only other request is to `version.json` on this same origin, which is how
-the app tells you whether it is the current copy. There are no outbound links
-to anywhere; nothing is fetched to make a suggestion. How cold it is out is a choice you
-make on the Today tab — Cold, Mild or Warm — rather than something the app
-asks a weather service about behind your back.
+This used to be one line short of true. Fraunces and Work Sans came from
+`fonts.googleapis.com`, and while no wardrobe data went with the request, every
+load still told Google that someone had opened the page from this address. The
+two typefaces now live in `fonts/` beside the app — three woff2 files, 110 KB,
+latin subset, under the SIL Open Font License that ships with them.
+
+That also fixed a real bug rather than only a principle. The service worker
+deliberately leaves cross-origin requests alone, so the stylesheet was never
+cached: with no signal it never arrived and the app quietly fell back to system
+fonts — the one thing a home-screen install is not supposed to do, done
+invisibly. The smoke test now measures the rendered width of a line of text
+online and offline and fails if they differ.
+
+Two things that look like they would catch that and do not, recorded because
+both were tried: `document.fonts.check('300 16px Fraunces')` answers **true**
+on a page where the stylesheet failed and nothing is in Fraunces, because
+fallback counts as being able to paint the text. Reading `font-family` off the
+element is worse — that is the CSS as written, not what the browser found.
 
 ## Photographing a piece
 
@@ -143,22 +160,78 @@ the piece afterwards and the app will read it from inside that — see
    no usable hue and are discarded, so no flash and no hard sun.
 7. **Warm bulbs are corrected up to a point.** The illuminant estimate is only
    trusted within a band; beyond it the correction is refused rather than
-   half-applied, and colours read warm. A window beats a lamp.
+   half-applied, and colours read warm. A window beats a lamp — though see
+   below, because in practice your phone has already done most of this.
 8. **One piece per photo**, straight on, whole thing in frame.
 
 The same list is in the app, under *Add piece*.
+
+### How much the warm-bulb limit actually costs
+
+Refusing a correction rather than clamping it is deliberate, and the cost looked
+alarming when simulated. Applying an increasingly orange cast to a rendered
+scene, the estimate is trusted up to about a 12% shift and refused past it, and
+accuracy falls off a cliff:
+
+| simulated cast | 0% | 12% | 18% | 24% | 30% | 40% |
+|---|---|---|---|---|---|---|
+| colours read right | 8/8 | 8/8 | 6/8 | 5/8 | 2/8 | 0/8 |
+
+That simulation is not a photograph, though, and the difference matters. **A
+phone applies its own auto white balance before it writes the JPEG**, so what
+reaches the app is a residual, not a raw cast. Measured on real indoor photos
+taken for this project under room lighting:
+
+| photo | implied correction |
+|---|---|
+| trainers held up in a lit room | 3% |
+| shirt on a bed | 2% — below the "leave it alone" floor |
+| a whole room, lamps and daylight mixed | 5% |
+
+None of them is within reach of the band's edge. The scenario the limit worries
+about does not arise in phone photos; what does hit the limit is a strongly
+coloured *surface* — wood, a blue wall, a rug — which is exactly what the
+refusal is there to protect.
+
+One idea that does not work, recorded so it is not tried again. The obvious
+second reference is the brightest pixels in the frame: under a coloured light
+even the highlights carry the cast, whereas under neutral light they should be
+near-white. Measured, they are not. A brown piece on pale wood under perfectly
+neutral light gives `[0.70, 0.97, 1.87]` — a *larger* implied correction than
+any warm lamp produces — because when nothing white is in shot, the brightest
+pixels are just the surface. It cannot tell a coloured light from a coloured
+floor either, and is worse than what is there now.
 
 ### What the photo decides, and what it asks you
 
 Two things are read off the picture, and they are read with very different
 confidence.
 
-**The colour** is measured, and it is reliable. Across 78 test photographs —
-six colours over warm and cool light, dark, white, wood, green and purple
-surfaces, and four framings — every hue read correctly. The misses left are
-neutrals: black and white against cluttered edges, and white under a warm bulb,
-which is the documented limit of the illuminant estimate. If the reading is not
-what you see, the four next-best candidates are offered as dots beside it.
+**The colour** is measured, and it is reliable. Across 154 renders — all
+twenty-two palette colours over seven surfaces from near-black to white, wood
+and green — one reads wrong, and it offers the right answer second. Every hue
+is correct; what is left is neutrals against neutrals.
+
+Where it gets harder is a photograph rather than a diagram. Adding surface
+texture, light falling off across the frame, and a shadow cast under the piece
+— separately and all at once — gives 180 harder cases, of which 12 read wrong.
+All twelve are a **pale** garment on a **pale** surface. Black, charcoal, navy,
+brown and grey are right in every single one.
+
+Six of those twelve used to be a specific and quite bad failure: a cast shadow
+was kept as part of the subject, and on a white shirt photographed on a white
+sheet the flood ate the *garment* and left only the shadow — so the colour was
+read off the shadow and the shirt came back **grey**. The shadow is now
+recognised as the surface dimmed rather than a thing lying on it. Silver, beige
+and white on pale surfaces all read correctly now.
+
+The remainder is honest ambiguity: a white shirt on a white sheet under uneven
+light is genuinely hard to separate, and a person looking at the same pixels
+would hesitate too. Photograph pale clothes on something darker — see the list
+above — or draw a box round the piece, which re-reads the colour from inside it.
+
+If the reading is not what you see, the four next-best candidates are offered as
+dots beside it.
 
 Note that colour survives a background the app cannot separate. The two are
 independent: it can decline to isolate a piece for the lay-out and still name

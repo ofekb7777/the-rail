@@ -11,9 +11,21 @@
 /* The cache is named for the version it holds, so publishing a new one
    retires the old cache instead of layering on top of it. Keep in step with
    APP_VERSION in the-rail.html and version.json -- CI checks that they agree. */
-const VERSION = '2026.08.20';
+const VERSION = '2026.08.24';
 const CACHE = 'the-rail-' + VERSION;
-const SHELL = ['./', './index.html', './the-rail.html'];
+/* The fonts belong in here now that they are served from beside the app. They
+   used to come from Google, and the fetch handler below deliberately leaves
+   cross-origin requests alone -- so offline the stylesheet never arrived and
+   the app silently changed typeface, which is the one thing a home-screen
+   install is not allowed to do. Being same-origin, they are cached by the
+   handler anyway once fetched; pre-caching them means the very first offline
+   launch is right too, rather than only the second. */
+const SHELL = [
+  './', './index.html', './the-rail.html',
+  './fonts/fraunces-latin.woff2',
+  './fonts/fraunces-italic-latin.woff2',
+  './fonts/work-sans-latin.woff2'
+];
 
 self.addEventListener('install', function(e){
   /* Pre-caching must not fail the install just because one URL 404s on a
