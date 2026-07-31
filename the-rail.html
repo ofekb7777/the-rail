@@ -523,6 +523,26 @@
 
 
 
+  .mark-panel{border:1px solid var(--line); border-radius:11px; padding:11px; margin-bottom:12px;}
+  .mark-head{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  .mark-title{font-size:12.5px; font-weight:700; color:var(--bone);}
+  .mark-clear{
+    background:none; border:none; color:var(--thread); font-family:'Work Sans';
+    font-size:11.5px; font-weight:600; cursor:pointer; padding:2px 4px;
+  }
+  .mark-sub{font-size:11.5px; color:rgba(239,232,216,0.5); line-height:1.45; margin:3px 0 9px;}
+  .mark-stage{
+    position:relative; border-radius:8px; overflow:hidden; background:#fff; cursor:crosshair;
+    /* the drag draws a box; it must not scroll the sheet or select the image */
+    touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+  }
+  .mark-stage img{width:100%; display:block; pointer-events:none; -webkit-user-drag:none;}
+  /* Everything outside the box is dimmed rather than the box outlined, so what
+     you are choosing reads at a glance on a small screen. */
+  .mark-box{
+    position:absolute; border:2px solid #fff; box-shadow:0 0 0 9999px rgba(10,12,18,0.55);
+    pointer-events:none; border-radius:2px;
+  }
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   @keyframes spin{to{transform:rotate(360deg);}}
   .sw-lg{width:26px;height:17px;border-radius:3px; display:block; border:1px solid rgba(0,0,0,0.25);}
@@ -1069,7 +1089,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.18';
+const APP_VERSION = '2026.08.19';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1875,7 +1895,13 @@ function guessCategoryFromShape(shape){
 
    This runs only when the border-based cut has already declined, so nothing
    that works today changes. */
-function subjectFromCentre(canvas){
+function subjectFromCentre(canvas, mark){
+  /* `mark` is an optional {x0,y0,x1,y1} in 0..1 -- the box you drew around the
+     piece. A single tapped point was tried first and is not enough: it says
+     which object you mean but nothing about how far it extends, so a white
+     shoe on a white desk grew out through the furniture and took the room
+     with it. A box gives both, in the same one gesture. Inside it is the
+     piece and its immediate surroundings; outside it is definitely not. */
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const d = ctx.getImageData(0,0,w,h).data;
@@ -1916,23 +1942,54 @@ function subjectFromCentre(canvas){
 
   const step = Math.max(1, Math.round(Math.min(w,h)/110));
 
-  /* The middle third, where the thing you photographed almost certainly is. */
-  const cx0 = Math.floor(w*0.33), cx1 = Math.ceil(w*0.67);
-  const cy0 = Math.floor(h*0.33), cy1 = Math.ceil(h*0.67);
+  /* Where the piece is. Without a tap, the middle third -- people centre what
+     they photograph, and that is the best guess available. With a tap, a small
+     disc around it, which is not a guess at all. */
+  /* The box, in pixels, and the part of it the piece is most certainly in. */
+  let bx0 = 0, by0 = 0, bx1 = w, by1 = h;
+  if(mark){
+    bx0 = Math.max(0, Math.floor(mark.x0*w));  bx1 = Math.min(w, Math.ceil(mark.x1*w));
+    by0 = Math.max(0, Math.floor(mark.y0*h));  by1 = Math.min(h, Math.ceil(mark.y1*h));
+    if(bx1 - bx0 < 8 || by1 - by0 < 8) return null;
+  }
+  const inBox = function(x, y){ return x >= bx0 && x < bx1 && y >= by0 && y < by1; };
+
+  /* Where the piece certainly is: the middle third of the box you drew, or of
+     the whole frame if you drew none -- people centre what they photograph.
+     A third and not a half, because a box drawn by hand is loose and its inner
+     half still catches the bedspread either side of a shirt; sampled as
+     garment, that teaches the fill that bedspread is cloth. Using the same
+     fraction either way also means a box drawn round the whole frame changes
+     nothing, which is what drawing one round the whole frame should do. */
+  const inset = function(a, b){ return Math.floor((b-a)*0.33); };
+  const cx0 = bx0 + inset(bx0,bx1), cx1 = bx1 - inset(bx0,bx1);
+  const cy0 = by0 + inset(by0,by1), cy1 = by1 - inset(by0,by1);
   const fore = model(function(emit){
     for(let y=cy0; y<cy1; y+=step) for(let x=cx0; x<cx1; x+=step) emit(y*w+x);
   }, 3);
 
-  /* The outer tenth, which is whatever the thing was lying on or held over. */
+  /* Whatever the thing was lying on or held over: the outer tenth of the
+     frame, plus -- if you drew a box -- everything outside it, which you have
+     just said the piece is not in.
+
+     The box is added to that sample, not substituted for it. Substituting was
+     tried and made a real photograph worse: a shirt held up fills the frame,
+     so the box people draw round it is nearly the frame, and the only pixels
+     left outside were a sliver too thin to describe a bedspread. The bedspread
+     stopped being recognised as backdrop and the fill leaked into it. Adding
+     instead means a tight box teaches us more and a loose one simply teaches
+     us nothing new. */
   const band = Math.max(2, Math.round(Math.min(w,h)*0.10));
+  const inBand = function(x, y){ return x < band || x >= w-band || y < band || y >= h-band; };
   const back = model(function(emit){
-    for(let y=0; y<h; y+=step){
-      for(let x=0; x<band; x+=step) emit(y*w+x);
-      for(let x=Math.max(band, w-band); x<w; x+=step) emit(y*w+x);
-    }
-    for(let x=band; x<w-band; x+=step){
-      for(let y=0; y<band; y+=step) emit(y*w+x);
-      for(let y=Math.max(band, h-band); y<h; y+=step) emit(y*w+x);
+    /* Each pixel once. The two regions overlap along the rim, and counting
+       that overlap twice is not harmless: the shares decide which clusters
+       survive as "surfaces", so double-weighting the rim let a box drawn just
+       inside the frame edge come out worse than one drawn round the whole
+       frame -- a box that says less producing a worse answer than a box that
+       says nothing, which is not a thing a hint should be able to do. */
+    for(let y=0; y<h; y+=step) for(let x=0; x<w; x+=step){
+      if(inBand(x,y) || (mark && !inBox(x,y))) emit(y*w+x);
     }
   }, 4);
 
@@ -1949,10 +2006,18 @@ function subjectFromCentre(canvas){
 
   /* If the middle and the rim are the same colour there is nothing here to
      separate -- a white shirt on a white sweep -- and guessing would carve a
-     hole in the garment. */
+     hole in the garment.
+
+     The bar drops once you have drawn a box, because most of what it is
+     guarding against no longer applies. Measured on a real photograph: a white
+     trainer held over a cream desk came out 11.5 apart and was refused by a
+     hair, even though the box said exactly where the shoe ended. Eleven and a
+     half is not "the same colour", it is a near miss, and the growth is
+     confined to the box anyway so a near miss can only cost part of the shoe
+     rather than the room. Below six there really is nothing to go on. */
   let apart = 0;
   fore.forEach(function(f){ apart = Math.max(apart, near(f.lab, back)); });
-  if(apart < 12) return null;
+  if(apart < (mark ? 6 : 12)) return null;
 
   /* Classifying every pixel against the two models independently is what
      ate the right-hand side of a black shirt and the right leg of a pair of
@@ -2015,6 +2080,10 @@ function subjectFromCentre(canvas){
       const x = idx % w, y = (idx-x)/w;
       const step = function(n){
         if(n < 0 || n >= w*h || got[n]) return;
+        if(mark){
+          const nx = n % w, ny = (n-nx)/w;
+          if(!inBox(nx, ny)) return;   /* you drew the edge; respect it */
+        }
         const c = labAt(n);
         if(labDist(c, from) > STEP) return;         /* a cliff: stop here */
         const db = near(c, back);
@@ -2091,7 +2160,10 @@ function subjectFromCentre(canvas){
     if(touches(0,y)) edgeHits++;
     if(touches(w-1,y)) edgeHits++;
   }
-  if(edgeHits/edgeTotal > 0.22) return null;
+  /* Loosened once you have pointed at the piece: a shirt held up can run to
+     the frame edge, and the island containing your tap is by definition the
+     thing you meant. */
+  if(!mark && edgeHits/edgeTotal > 0.22) return null;
 
   /* How much of its own bounding box the island fills. A garment lying down
      is a solid shape and fills most of it; a fragment of shoe, a band of desk
@@ -2105,7 +2177,11 @@ function subjectFromCentre(canvas){
      hand against a room does not, and is left alone rather than guessed at,
      because naming a garment after a desk is worse than not naming it. */
   const fillRatio = best.area / Math.max(1, (best.x1-best.x0+1)*(best.y1-best.y0+1));
-  if(fillRatio < 0.48) return null;
+  /* The compactness bar exists to answer "is this really the piece, or a strip
+     of desk?". A tap answers that outright, so it is not asked again -- and a
+     shoe held in a hand, which fails this bar every time, becomes workable the
+     moment you point at it. */
+  if(!mark && fillRatio < 0.48) return null;
 
   /* Re-walk the winning island to mark it, since the labelling above cannot
      tell the islands apart afterwards. */
@@ -2140,6 +2216,13 @@ function subjectFromCentre(canvas){
 
   /* The convention everywhere else in this file is that the mask marks
      background, so that is what is handed back. */
+  /* Nothing outside a box you drew can survive this, and it is worth saying
+     why there is no clamp here enforcing that. The growth is confined to the
+     box, so the island is; a pocket that the flood cannot reach is by
+     definition enclosed by the island, so it is inside the box too. The
+     guarantee holds by construction rather than by being trimmed at the end,
+     which is what makes it safe to relax the guards above when a box is
+     present. The smoke test checks it exactly. */
   const mask = new Uint8Array(w*h);
   let subjectArea = 0;
   for(let idx=0; idx<w*h; idx++){
@@ -4915,6 +4998,32 @@ function openDetail(id){
     +   '</div>'
     +   '<button id="favBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:'+(item.favourite?'var(--thread)':'rgba(239,232,216,0.3)')+';padding:2px;">♥</button>'
     + '</div>'
+    /* Marking the piece. Colour alone cannot separate a garment from a
+       background of the same colour, from another object of the same colour
+       in shot, or from whatever it is touching -- and every bad cut so far
+       has been one of those three.
+
+       A single tapped point was the first attempt and made things worse: on a
+       real photograph of a white trainer held over a cream desk it grew out
+       through the furniture and returned the room. A point says which object
+       you mean but nothing about where it ends. A box says both, in the same
+       one gesture, and measured on the same photographs the tighter the box
+       the better the cut -- with a box round the whole frame coming out
+       exactly as the automatic reading does. */
+    + '<div class="mark-panel">'
+    +   '<div class="mark-head">'
+    +     '<span class="mark-title">' + (item.cutMark ? 'Marked' : 'Cut-out not right?') + '</span>'
+    +     (item.cutMark ? '<button class="mark-clear" id="clearMarkBtn">clear</button>' : '')
+    +   '</div>'
+    +   '<div class="mark-sub">Drag a box round the piece in the photo below. Keep it close to the edges &mdash; the tighter it is, the better the cut.</div>'
+    +   '<div class="mark-stage" id="markStage">'
+    +     '<img src="'+imgSrc(item)+'" alt="">'
+    +     (item.cutMark
+        ? '<span class="mark-box" id="markBox" style="left:'+(item.cutMark.x0*100)+'%;top:'+(item.cutMark.y0*100)+'%'
+          + ';width:'+((item.cutMark.x1-item.cutMark.x0)*100)+'%;height:'+((item.cutMark.y1-item.cutMark.y0)*100)+'%"></span>'
+        : '<span class="mark-box" id="markBox" style="display:none"></span>')
+    +   '</div>'
+    + '</div>'
     + '<button class="btn-primary" id="buildAroundBtn">Build an outfit around this</button>'
     + '<button class="btn-secondary" id="woreItemBtn">I\'m wearing this today</button>'
     + '<button class="btn-secondary" id="editItemBtn">Edit details</button>'
@@ -4944,6 +5053,94 @@ function openDetail(id){
     await saveItems();
     openDetail(id);
   };
+  /* One drag is the whole interaction. Pointer events rather than mouse or
+     touch ones: the same three handlers then cover finger, stylus and mouse,
+     and capture means a drag that runs off the photo still finishes here
+     instead of being lost to whatever it passed over. */
+  const stage = document.getElementById('markStage');
+  const boxEl = document.getElementById('markBox');
+  if(stage && boxEl){
+    let from = null;
+    /* Null rather than a fraction of nothing. The stage has no height until
+       the photo has loaded into it, and dividing by that height gives NaN --
+       which sails through a "is this box big enough" test, gets stored, and
+       leaves the piece with a mark that can never be read. */
+    const at = function(e){
+      const r = stage.getBoundingClientRect();
+      if(r.width < 1 || r.height < 1) return null;
+      return {
+        x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+        y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+      };
+    };
+    const show = function(a, b){
+      boxEl.style.display = '';
+      boxEl.style.left   = (Math.min(a.x,b.x)*100) + '%';
+      boxEl.style.top    = (Math.min(a.y,b.y)*100) + '%';
+      boxEl.style.width  = (Math.abs(b.x-a.x)*100) + '%';
+      boxEl.style.height = (Math.abs(b.y-a.y)*100) + '%';
+    };
+    stage.onpointerdown = function(e){
+      from = at(e);
+      if(!from) return;
+      /* Capture can be refused -- a pointer the browser no longer considers
+         active -- and losing the drag is a better outcome than losing the
+         handler to an exception. */
+      try{ stage.setPointerCapture(e.pointerId); }catch(err){}
+      show(from, from);
+      e.preventDefault();
+    };
+    stage.onpointermove = function(e){
+      const p = from && at(e);
+      if(p) show(from, p);
+    };
+    stage.onpointerup = async function(e){
+      const a = from, b = at(e);
+      from = null;
+      if(!a || !b) return;
+      const box = {
+        x0: +Math.min(a.x,b.x).toFixed(4), y0: +Math.min(a.y,b.y).toFixed(4),
+        x1: +Math.max(a.x,b.x).toFixed(4), y1: +Math.max(a.y,b.y).toFixed(4)
+      };
+      /* A stray tap is not a box. Snapping back to whatever was stored keeps
+         a mis-touch from silently throwing away a good mark. Written so that
+         anything not a real measurement fails it rather than passes it. */
+      if(!(box.x1 - box.x0 >= 0.06) || !(box.y1 - box.y0 >= 0.06)){
+        openDetail(id);
+        return;
+      }
+      item.cutMark = box;
+      _layCache.delete(item.id);
+      /* Only when the colour is still the app's own guess. A colour you set by
+         hand is an answer, and drawing a box is not a request to overrule it. */
+      let recoloured = null;
+      if(item.colorAuto !== false){
+        const colors = await recolourFromMark(item);
+        if(colors && colors[0] && colors[0].name !== item.color){
+          recoloured = colors[0].name;
+          item.color = recoloured;
+        }
+      }
+      await saveItems();
+      /* Re-render rather than patch the sheet, so the box, the heading and
+         the lay-out all follow from the one stored fact instead of three
+         places agreeing by hand. */
+      openDetail(id);
+      render();
+      toast(recoloured ? 'Reading it from inside the box — ' + recoloured
+                       : 'Reading the piece from inside the box');
+    };
+    stage.onpointercancel = function(){ from = null; openDetail(id); };
+  }
+  const clearMark = document.getElementById('clearMarkBtn');
+  if(clearMark) clearMark.onclick = async function(){
+    delete item.cutMark;
+    _layCache.delete(item.id);
+    await saveItems();
+    openDetail(id);
+    render();
+  };
+
   document.getElementById('buildAroundBtn').onclick = function(){
     state.anchorId = id;
     state.tab = 'today';
@@ -4988,6 +5185,9 @@ function openDetail(id){
     target.name = document.getElementById('editName').value.trim() || target.name;
     target.brand = document.getElementById('editBrand').value.trim() || null;
     target.category = document.getElementById('editCategory').value;
+    /* Remember that this one was answered rather than guessed, so marking the
+       piece later re-reads a guessed colour but never overwrites yours. */
+    if(editColor !== target.color) target.colorAuto = false;
     target.color = editColor;
     target.warmth = newWarm;
     target.formality = newForm;
@@ -5337,10 +5537,12 @@ function addStickerOutline(canvas, px){
    really is one surface that is the more exact of the two; the middle after,
    for the photographs people actually take -- on a bed, on a rug, on a desk.
    One function so the app and its tests cannot drift apart on which is which. */
-function liftForLayout(canvas){
-  if(isolateForLayout(canvas)) return true;
-  const mid = subjectFromCentre(canvas);
-  if(!mid) return false;
+function liftForLayout(canvas, mark){
+  /* A tap outranks the automatic reading: it was given precisely because the
+     automatic one was wrong. */
+  if(!mark && isolateForLayout(canvas)) return true;
+  const mid = subjectFromCentre(canvas, mark);
+  if(!mid) return mark ? isolateForLayout(canvas) : false;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
   for(let i=0; i<mid.mask.length; i++){
@@ -5371,7 +5573,7 @@ async function enhanceLayImages(){
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
-      const url = liftForLayout(c)
+      const url = liftForLayout(c, item.cutMark)
         ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png')
         : null;
       _layCache.set(id, url);
@@ -5380,6 +5582,35 @@ async function enhanceLayImages(){
       _layCache.set(id, null);
       settle(null);
     }
+  }
+}
+
+/* A wrong cut and a wrong colour are usually the same mistake. When the piece
+   could not be told from the room, the colours were read off the room too --
+   which is how a black shirt on a pale bed came back sand. So the box does not
+   only fix the lay-out: it re-reads the colour from inside itself.
+
+   The category is deliberately left alone. It is confirmed by hand before an
+   item can be saved, so it is already right, and quietly changing an answer
+   someone gave is worse than leaving a stale one.
+
+   Returns the new colour list, or null if nothing better could be read. */
+async function recolourFromMark(item){
+  if(!item || !item.image || !item.cutMark) return null;
+  try{
+    const img = await loadImageFromDataUrl(item.image);
+    const lit = subjectFromCentre(drawToCanvas(img, 420), item.cutMark);
+    if(!lit || !lit.mask) return null;
+    const measure = drawToCanvas(img, 420);
+    try{
+      const gains = estimateIlluminant(measure);
+      if(gains) applyGains(measure, gains);
+    }catch(e){ console.warn('white balance failed', e); }
+    const colors = detectColors(measure, lit.mask);
+    return (colors && colors.length) ? colors : null;
+  }catch(e){
+    console.warn('re-reading colour from the box failed', e);
+    return null;
   }
 }
 
