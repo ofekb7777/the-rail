@@ -11,7 +11,7 @@
 /* The cache is named for the version it holds, so publishing a new one
    retires the old cache instead of layering on top of it. Keep in step with
    APP_VERSION in the-rail.html and version.json -- CI checks that they agree. */
-const VERSION = '2026.08.28';
+const VERSION = '2026.08.29';
 const CACHE = 'the-rail-' + VERSION;
 /* The fonts belong in here now that they are served from beside the app. They
    used to come from Google, and the fetch handler below deliberately leaves

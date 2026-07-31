@@ -946,6 +946,128 @@ try {
   });
   for (const m of backupMisses) failures.push(`backup: ${m}`);
 
+  // Names people actually type, and records a backup file can actually carry.
+  // The emoji case is the one that matters: "👟 sneakers" is an ordinary thing
+  // to call a pair of trainers, and it took down the Wardrobe tab and the Stats
+  // tab with "URI malformed" -- charAt(0) returns half a surrogate pair and
+  // encodeURIComponent refuses it. Nothing in the suite typed anything but
+  // ASCII, so nothing saw it.
+  //
+  // The malformed records below cannot be typed in. They arrive through a
+  // hand-edited or truncated backup file, which is a door this app deliberately
+  // leaves open, so they should not take a tab down either.
+  const nastyMisses = await page.evaluate(async () => {
+    const missed = [];
+    window.__ranScript = false;
+    const mk = (name, cat, color, extra) => Object.assign({
+      id: 'x' + Math.random().toString(36).slice(2, 9),
+      name, category: cat, color, warmth: 3, formality: 3,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    }, extra || {});
+    // "typed" marks the ones a person can actually put in through the add
+    // sheet. Those have to work exactly as they arrive, because nothing is
+    // going to repair them -- the name is whatever you wrote. The rest can only
+    // come from a hand-edited or truncated backup, and are expected to work
+    // once the app's normalisation has been over them.
+    const cases = {
+      'an emoji in the name': { item: mk('👟 sneakers 🔥', 'footwear', 'red'), typed: true },
+      'a Hebrew name': { item: mk('חולצה לבנה', 'top', 'white'), typed: true },
+      'markup in the name': { item: mk('<img src=x onerror="window.__ranScript=true">', 'top', 'white'), typed: true },
+      'a script tag in the name': { item: mk('"><script>window.__ranScript=true<\/script>', 'bottom', 'blue'), typed: true },
+      'a very long name': { item: mk('A'.repeat(400), 'top', 'green'), typed: true },
+      'an empty name': { item: mk('', 'bottom', 'grey'), typed: true },
+      'a lone surrogate': { item: mk('bad \ud800 name', 'top', 'white'), typed: true },
+      'no name at all': { item: mk(undefined, 'top', 'white'), typed: false },
+      'no category': { item: mk('No category', undefined, 'white'), typed: false },
+      'no colour': { item: mk('No colour', 'top', undefined), typed: false },
+      'null warmth': { item: mk('Null warmth', 'top', 'white', { warmth: null, formality: null }), typed: false },
+    };
+    // A typed name is run twice: once through the normalisation the app does on
+    // load and on import, and once raw, because nothing repairs what you typed
+    // and it has to work as it stands. A malformed record is only run repaired,
+    // since every door into the wardrobe -- the add sheet, the load migration,
+    // import -- normalises, so an unrepaired one is a state the app cannot be
+    // in. Asserting against it would be inventing a requirement.
+    for (const [rawLabel, spec] of Object.entries(cases)) {
+     for (const normalise of (spec.typed ? [true, false] : [true])) {
+      const label = rawLabel + (normalise ? '' : ', exactly as typed');
+      state.items = [JSON.parse(JSON.stringify(spec.item))];
+      Object.keys(spec.item).forEach(function (k) {
+        if (spec.item[k] === undefined) state.items[0][k] = undefined;
+      });
+      state.outfits = []; state.wearLog = []; state.plans = {};
+      if (normalise) state.items.forEach(enrichItem);
+      for (const tab of ['today', 'wardrobe', 'plan', 'stats', 'saved']) {
+        state.tab = tab;
+        try { render(); } catch (e) { missed.push(`${label}: the ${tab} tab threw "${e.message}"`); continue; }
+        await new Promise((r) => setTimeout(r, 90));
+        const el = document.getElementById('main');
+        if (!el.children.length) missed.push(`${label}: the ${tab} tab rendered nothing`);
+        if (/NaN|undefined|Infinity/.test(el.textContent)) {
+          missed.push(`${label}: the ${tab} tab shows "${el.textContent.match(/.{0,24}(NaN|undefined|Infinity).{0,16}/)[0]}"`);
+        }
+        // a name must never become markup, repaired or not
+        if (el.querySelector('script')) missed.push(`${label}: the name became a <script> element`);
+        if (el.querySelector('img[onerror]')) missed.push(`${label}: the name became an <img onerror>`);
+      }
+      for (const [what, call] of Object.entries({
+        'the stylist': () => generateLooks({ occasion: 'Everyday', temp: 'mild', count: 2 }),
+        'the gap analysis': () => analyseGaps(),
+        'stats': () => wardrobeStats(),
+        'the photo placeholder': () => imgSrc(state.items[0]),
+      })) {
+        try { call(); } catch (e) { missed.push(`${label}: ${what} threw "${e.message}"`); }
+      }
+     }
+    }
+    if (window.__ranScript) missed.push('an item name executed script');
+    return [...new Set(missed)];
+  });
+  for (const m of nastyMisses) failures.push(`odd input: ${m}`);
+
+  // The block above calls the repair directly. This one goes through the door:
+  // a malformed record is written into storage and the app is reloaded, which
+  // is how one would really arrive -- restored by an older version of the app,
+  // then opened by this one.
+  //
+  // Worth testing separately because the load path does not repair everything
+  // it reads. It repairs an item that is missing something it knows how to
+  // fill, and the list of what counts as missing is easy to leave a hole in:
+  // before this, an item with a warmth but no colour was never visited, and
+  // showed up in the stats as the word "undefined".
+  await page.evaluate(async () => {
+    await saveKey('wardrobe:items', [
+      // has a warmth, so the old condition skipped it entirely
+      { id: 'broken1', name: 'No colour', category: 'top', warmth: 3, formality: 3, createdAt: Date.now() },
+      { id: 'broken2', category: 'bottom', color: 'blue', warmth: 3, formality: 3, createdAt: Date.now() },
+    ]);
+    await saveOutfits(); await saveWearLog(); await savePlans();
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof render === 'function' && state.items.length > 0,
+    { timeout: 15000 });
+  const repaired = await page.evaluate(async () => {
+    const missed = [];
+    const a = state.items.find((i) => i.id === 'broken1');
+    const b = state.items.find((i) => i.id === 'broken2');
+    if (!a || !b) return ['a malformed record did not survive being loaded at all'];
+    if (typeof a.color !== 'string' || !a.color) missed.push('a piece with no colour was loaded without one being filled in');
+    if (typeof b.name !== 'string') missed.push('a piece with no name was loaded without one being filled in');
+    for (const tab of ['today', 'wardrobe', 'plan', 'stats', 'saved']) {
+      state.tab = tab;
+      try { render(); } catch (e) { missed.push(`the ${tab} tab threw "${e.message}" on a loaded malformed record`); continue; }
+      await new Promise((r) => setTimeout(r, 90));
+      const el = document.getElementById('main');
+      if (/NaN|undefined|Infinity/.test(el.textContent)) {
+        missed.push(`the ${tab} tab shows "${el.textContent.match(/.{0,24}(NaN|undefined|Infinity).{0,16}/)[0]}"`);
+      }
+    }
+    state.items = [];
+    await saveItems();
+    return missed;
+  });
+  for (const m of repaired) failures.push(`on load: ${m}`);
+
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
   // the file, and its failure mode is silence: an empty list of suggestions
@@ -1035,7 +1157,19 @@ try {
   // that writes prefs as a side effect, and this failed pointing at the cut
   // switch, which was not what was wrong. A test that depends on the state
   // another test happened to leave behind reports the wrong culprit.
-  await page.evaluate(async () => { state.layCut = false; await savePrefs(); });
+  // Read it back before reloading rather than trusting the write. This failed
+  // once, exactly once, and reported "the setting did not survive a reload" --
+  // which would have sent someone looking at the loading code when the write
+  // was what had not finished. Confirming it landed means a failure after this
+  // point really is about reading it back.
+  const wrote = await page.evaluate(async () => {
+    state.layCut = false;
+    await savePrefs();
+    const raw = await storageGet('wardrobe:prefs');
+    const p = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    return p.layCut;
+  });
+  if (wrote !== false) failures.push(`cut switch: the setting never reached storage (${wrote})`);
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => typeof render === 'function' && state.items.length > 0,
     { timeout: 15000 });

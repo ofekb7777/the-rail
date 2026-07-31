@@ -540,6 +540,17 @@ saved looks, wear log and plans all have to return, along with every per-item
 field — the photo, the brand, the favourite mark, the box you drew round a
 piece, and whether you asked for it to be shown as a photograph.
 
+Names are yours: emoji, Hebrew, punctuation, markup, four hundred characters,
+or nothing at all. Naming a pair of trainers **👟 sneakers** used to take down
+the Wardrobe tab and the Stats tab with "URI malformed" — `charAt(0)` returns
+half a surrogate pair and the placeholder image refuses to encode it. Every
+colour test in the suite had been ASCII, so nothing saw it.
+
+A record with a hole in it — no colour, no name — cannot be typed in, but a
+hand-edited or truncated backup can carry one, and so can a wardrobe restored by
+an older version of the app. Those are repaired on the way in rather than
+guarded against at each of the nine places that read a name.
+
 One deliberate exception. Warmth, formality and tags are **re-inferred from the
 name on import** for anything still on the app's own guess, so a backup taken
 before a keyword was added benefits from it. Anything you corrected by hand is
