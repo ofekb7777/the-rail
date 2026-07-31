@@ -1069,7 +1069,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.17';
+const APP_VERSION = '2026.08.18';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1904,8 +1904,14 @@ function subjectFromCentre(canvas){
     });
     let total = 0;
     cent.forEach(function(c){ total += c.n; });
-    /* A cluster that barely appeared is noise, not a surface. */
-    return cent.filter(function(c){ return c.n/total > 0.08; });
+    /* Only what dominates the sample counts as a surface. The rim of one real
+       photograph held a second dark garment in a corner -- 14% of the border --
+       and at a lower bar that became a legitimate "backdrop" colour, against
+       which the shirt's own shaded side matched better than it matched the
+       black in the middle of itself. A fifth of the shirt was refused for it.
+       A backdrop is what most of the border is, not everything that appears
+       there. */
+    return cent.filter(function(c){ return c.n/total > 0.22; });
   };
 
   const step = Math.max(1, Math.round(Math.min(w,h)/110));
@@ -1948,23 +1954,90 @@ function subjectFromCentre(canvas){
   fore.forEach(function(f){ apart = Math.max(apart, near(f.lab, back)); });
   if(apart < 12) return null;
 
-  /* Distance from the middle counts against a pixel. Without it, a white shoe
-     on a white desk takes the desk with it -- the furniture matches the shoe
-     perfectly and there is nothing in colour alone to separate them. Being
-     far from the centre is the evidence that a matching pixel is not part of
-     what you photographed. */
+  /* Classifying every pixel against the two models independently is what
+     ate the right-hand side of a black shirt and the right leg of a pair of
+     black shorts: both were lit from one side, so that half of the fabric is
+     mid-grey, and mid-grey sits closer to a pale bedspread than to the black
+     in the middle of the frame. No global threshold can follow a gradient.
+
+     Growing does. Start from the pixels that are unambiguously the piece, and
+     walk outward one neighbour at a time, accepting a step only when it is
+     small. A gradient across cloth is a sequence of small steps and is
+     followed all the way to the hem; the jump from cloth to bedding is a
+     cliff and stops it. A pixel that clearly belongs to the backdrop is
+     refused however gentle the step to it, so a soft shadow edge cannot leak
+     the fill out into the room. */
   const cxp = w/2, cyp = h/2;
-  const maxR = Math.sqrt(cxp*cxp + cyp*cyp);
-  const isFore = new Uint8Array(w*h);
-  for(let idx=0; idx<w*h; idx++){
-    const x = idx % w, y = (idx-x)/w;
-    const c = lab(idx);
-    const df = near(c, fore), db = near(c, back);
-    const r = Math.sqrt((x-cxp)*(x-cxp) + (y-cyp)*(y-cyp)) / maxR;
-    /* Nothing at the centre, rising to a real handicap at the corners. */
-    const pull = r * r * 26;
-    if(df + pull < db - 2) isFore[idx] = 1;
+  const seed = new Uint8Array(w*h);
+  const labCache = new Float32Array(w*h*3);
+  const labAt = function(idx){
+    const o = idx*3;
+    if(labCache[o] === 0 && labCache[o+1] === 0 && labCache[o+2] === 0){
+      const c = lab(idx);
+      labCache[o] = c.L || 0.0001; labCache[o+1] = c.a; labCache[o+2] = c.b;
+      return c;
+    }
+    return {L:labCache[o], a:labCache[o+1], b:labCache[o+2]};
+  };
+
+  for(let y=cy0; y<cy1; y++){
+    for(let x=cx0; x<cx1; x++){
+      const idx = y*w+x;
+      const c = labAt(idx);
+      /* only the confident middle seeds the growth */
+      if(near(c, fore) + 8 < near(c, back)) seed[idx] = 1;
+    }
   }
+
+  const STEP = 12;       /* how far one pixel may differ from its neighbour */
+  const BACKSTOP = 11;   /* how close to the backdrop is too close to accept */
+
+  /* The centre of a black shirt is uniformly black, so a model built from it
+     alone knows one tone -- measured on a real photograph, a single cluster at
+     L=17.9. The same shirt's shaded right-hand side runs to L=36, and the rim
+     of that photograph happens to include a dark corner, giving the backdrop a
+     cluster at L=39. So the garment's own shading came out closer to the
+     backdrop than to the garment, and a fifth of the shirt was refused.
+
+     The answer is not a looser threshold, which would let the bedding in. It
+     is that the model should learn what the piece looks like from the piece.
+     Grow once with what the middle knows, rebuild the description from
+     everything that grew, and grow again -- the second pass knows the garment
+     runs from black to mid-grey and follows it out to the hem. */
+  const grow = function(model){
+    const got = new Uint8Array(w*h);
+    const queue = [];
+    for(let idx=0; idx<w*h; idx++) if(seed[idx]){ got[idx] = 1; queue.push(idx); }
+    let qi = 0;
+    while(qi < queue.length){
+      const idx = queue[qi++];
+      const from = labAt(idx);
+      const x = idx % w, y = (idx-x)/w;
+      const step = function(n){
+        if(n < 0 || n >= w*h || got[n]) return;
+        const c = labAt(n);
+        if(labDist(c, from) > STEP) return;         /* a cliff: stop here */
+        const db = near(c, back);
+        if(db < BACKSTOP) return;                          /* plainly the backdrop */
+        got[n] = 1;
+        queue.push(n);
+      };
+      if(x>0)   step(idx-1);
+      if(x<w-1) step(idx+1);
+      if(y>0)   step(idx-w);
+      if(y<h-1) step(idx+w);
+    }
+    return got;
+  };
+
+  let isFore = grow(fore);
+  if(!isFore.some(function(v){ return v; })) return null;
+
+  /* What did the first pass turn out to be? Describe that, and go again. */
+  const learned = model(function(emit){
+    for(let idx=0; idx<w*h; idx+=1) if(isFore[idx]) emit(idx);
+  }, 5);
+  if(learned.length) isFore = grow(learned.concat(fore));
 
   /* Keep only the island that actually covers the middle. Everything else
      that happens to match -- a second shoe out of frame, a shadow, a sleeve
