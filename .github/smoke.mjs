@@ -1068,6 +1068,83 @@ try {
   });
   for (const m of repaired) failures.push(`on load: ${m}`);
 
+  // Swapping a piece out of a look, and writing down what you wore. Both are
+  // fine today; both fail silently if they break. A swap that offers a piece
+  // already in the look, or leaves two tops behind, produces an outfit that
+  // looks like an outfit. A wear log that drops the newest entry instead of the
+  // oldest loses exactly the history you would notice last.
+  const swapWearMisses = await page.evaluate(async () => {
+    const missed = [];
+    await loadDemoWardrobe();
+    const pick = (c) => state.items.find((i) => i.category === c);
+    const ids = ['top', 'bottom', 'footwear'].map(pick).filter(Boolean).map((i) => i.id);
+    state.lastResult = { outfits: [{ itemIds: ids.slice(), title: 'T', percent: 80, pills: [] }] };
+    state.activeOption = 0; state.tab = 'today';
+    state.wearLog = []; state.outfits = []; state.plans = {};
+    render();
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const target = ids[0];
+    const targetCat = state.items.find((i) => i.id === target).category;
+    openSwapSheet(target);
+    await new Promise((r) => setTimeout(r, 400));
+    const cards = [...document.querySelectorAll('[data-swap-to]')];
+    if (!cards.length) missed.push('swapping a piece offered no alternatives at all');
+    for (const c of cards) {
+      const alt = state.items.find((i) => i.id === c.getAttribute('data-swap-to'));
+      if (!alt) { missed.push('an offered alternative is not in the wardrobe'); continue; }
+      if (alt.category !== targetCat) missed.push(`swapping a ${targetCat} offered a ${alt.category}`);
+      if (alt.id === target) missed.push('the piece being swapped was offered as its own replacement');
+      if (ids.includes(alt.id)) missed.push('a piece already in the look was offered as a replacement');
+    }
+    if (cards.length) {
+      const chosen = cards[0].getAttribute('data-swap-to');
+      cards[0].click();
+      await new Promise((r) => setTimeout(r, 700));
+      const now = normalizeResult(state.lastResult).outfits[0].itemIds;
+      if (now.includes(target)) missed.push('the old piece is still in the look after a swap');
+      if (!now.includes(chosen)) missed.push('the chosen piece did not go into the look');
+      if (now.length !== ids.length) missed.push(`a swap changed the look's length: ${ids.length} to ${now.length}`);
+      if (new Set(now).size !== now.length) missed.push('a swap left the same piece in the look twice');
+      const cats = now.map((id) => state.items.find((x) => x.id === id)).filter(Boolean)
+        .map((i) => i.category).filter((c) => c !== 'accessory');
+      const dupe = cats.find((c, i) => cats.indexOf(c) !== i);
+      if (dupe) missed.push(`a swap left two ${dupe}s in the look`);
+    }
+    document.getElementById('swapOverlay')?.classList.remove('open');
+
+    // what you wore
+    state.wearLog = [];
+    logWear(ids, 'Test look');
+    const todays = state.wearLog.filter((w) => w.date === todayKey());
+    if (todays.length !== 1) missed.push(`logging one wear produced ${todays.length} entries for today`);
+    else if (JSON.stringify(todays[0].itemIds) !== JSON.stringify(ids)) {
+      missed.push('the logged pieces are not the ones worn');
+    }
+    if (!(wardrobeStats().totalWears >= 1)) missed.push('a wear did not reach the stats');
+
+    // deleting a piece must not rewrite what you actually wore
+    const gone = ids[0];
+    state.items = state.items.filter((i) => i.id !== gone);
+    try { wardrobeStats(); } catch (e) { missed.push(`stats threw once a worn piece was deleted: "${e.message}"`); }
+    if (!state.wearLog.some((w) => w.itemIds.includes(gone))) {
+      missed.push('deleting a piece rewrote the history of having worn it');
+    }
+
+    // the log is capped; the cap must drop the oldest, not the newest
+    state.wearLog = [];
+    for (let i = 0; i < 900; i++) state.wearLog.push({ date: todayKey(), itemIds: [ids[1]], title: 'w' + i });
+    logWear([ids[1]], 'newest');
+    if (state.wearLog.length > 800) missed.push(`the wear log grew to ${state.wearLog.length}`);
+    if (state.wearLog[state.wearLog.length - 1].title !== 'newest') {
+      missed.push('the cap threw away the newest entry instead of the oldest');
+    }
+    if (state.wearLog.some((w) => w.title === 'w0')) missed.push('the cap kept the oldest entries');
+    state.wearLog = [];
+    return [...new Set(missed)];
+  });
+  for (const m of swapWearMisses) failures.push(`swap and wear: ${m}`);
+
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
   // the file, and its failure mode is silence: an empty list of suggestions
