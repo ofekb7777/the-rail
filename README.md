@@ -311,6 +311,19 @@ with no shoes logged and got a card with a title, a percentage fit and no shoes
 on it, which reads as a finished answer rather than the best available one. It
 now says so on the card, with a way to add the missing pieces.
 
+### What else was swept, and found sound
+
+Recorded because a negative result is worth as much as a fix, and because it
+says what has actually been looked at.
+
+| Area | Checked | Result |
+|---|---|---|
+| Swapping a piece | only same-category alternatives, never one already in the look, never itself; the look keeps its length and gains no duplicates | sound |
+| The wear log | one entry per wear, reaching the stats immediately, surviving the piece being deleted, capped at 800 keeping the **newest** | sound |
+| Plan and calendar | thirteen months either side, plans landing on the day they were made for, a planned piece then deleted | sound |
+| Stats | counts agreeing with a wear log written by hand, and a log referring to pieces that no longer exist | sound |
+| Speed | 500 pieces with 400 wear entries | stylist 40ms, stats 5ms, all five tabs 125ms; the gap analysis is the slowest at ~460ms, and it is behind a switch |
+
 Sixty looks were generated across every occasion and temperature to check the
 stylist keeps its own promises, and then again on wardrobes shaped awkwardly —
 three pieces, no shoes, all formal, all one colour, twelve tops and one pair of
