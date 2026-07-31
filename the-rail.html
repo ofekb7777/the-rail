@@ -630,6 +630,14 @@
   .bp-text.warn{color:var(--mustard);}
 
   .swap-tip{font-size:11px; color:#6b6455; margin:10px 0 2px; letter-spacing:0.2px;}
+  /* On the cream card, so it needs the ink palette rather than the bone one.
+     Marked out with a rule down the side rather than a colour, because it is a
+     caveat and not a warning -- the look is still worth showing. */
+  .incomplete-note{
+    font-size:12px; line-height:1.5; color:#5a5445; margin:10px 0 2px;
+    border-left:2px solid var(--thread); padding-left:9px;
+  }
+  .incomplete-note .sec-action{color:var(--thread-dark); font-size:12px;}
   /* The cut-out switch sits on the cream card rather than the dark one, so it
      needs its own colours -- the shared .switch is fine, but the label beside
      it is written for a dark background and would be near-invisible here. */
@@ -1137,7 +1145,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.26';
+const APP_VERSION = '2026.08.27';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -4354,6 +4362,7 @@ function renderOutfitResult(outfit, saved, savedIdx){
     +   '<button class="switch '+(state.layCut?'on':'')+'" data-lay-cut '
     +     'aria-label="Cut pieces out of their photos"></button>'
     + '</div>'
+    + incompleteNote(outfit)
     + (!saved ? '<div class="swap-tip">Tap a piece to swap it for another</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
     + badge
@@ -4369,6 +4378,52 @@ function renderOutfitResult(outfit, saved, savedIdx){
         : '<button class="save-outfit-btn">Save this look</button>'
           + '<button class="wore-btn" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>')
+    + '</div>';
+}
+
+/* A look is head to foot: something on top, something on the bottom, something
+   on your feet. When the wardrobe holds none of a category the stylist builds
+   the outfit without it rather than refusing -- which is the right call, since
+   a shirt and jeans is still useful when you have not photographed your shoes
+   yet.
+
+   What was wrong was saying nothing about it. You pressed "What should I wear?"
+   and got a card with a title and a percentage fit and no shoes on it, which
+   reads as a finished answer rather than the best available one. Every other
+   place this app is unsure it says so -- it leaves a category blank rather than
+   guessing, refuses a cut-out rather than mangling a photo, declines a white
+   balance rather than half-applying it. This is the same thing. */
+function incompleteNote(outfit){
+  const ids = outfit.itemIds || [];
+  const present = {};
+  ids.forEach(function(id){
+    const it = state.items.find(function(i){ return i.id===id; });
+    if(it) present[it.category] = true;
+  });
+  const owned = function(cat){ return state.items.some(function(i){ return i.category===cat; }); };
+  /* Plural throughout, so every sentence below reads without an article. */
+  const WORDS = {top:'tops', bottom:'bottoms', footwear:'shoes'};
+  const missing = ['top','bottom','footwear'].filter(function(c){ return !present[c]; });
+  if(!missing.length) return '';
+
+  /* Two quite different situations needing two different sentences: you own
+     none of these at all, or you own some and this look happens not to use
+     one. Only the first is expected. */
+  const none = missing.filter(function(c){ return !owned(c); });
+  const some = missing.filter(function(c){ return owned(c); });
+  const list = function(a){ return a.map(function(c){ return WORDS[c]; }).join(' or '); };
+
+  let text;
+  if(none.length && !some.length){
+    text = 'No ' + list(none) + ' in this look — there are none in your wardrobe yet.';
+  }else if(none.length && some.length){
+    text = 'This look has no ' + list(some) + ', and there are no ' + list(none)
+         + ' in your wardrobe yet.';
+  }else{
+    text = 'This look has no ' + list(some) + '.';
+  }
+  return '<div class="incomplete-note">' + escapeHtml(text)
+    + (none.length ? ' <button class="sec-action" data-do="add">Add some</button>' : '')
     + '</div>';
 }
 
