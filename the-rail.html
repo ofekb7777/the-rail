@@ -1145,7 +1145,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.28';
+const APP_VERSION = '2026.08.29';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1440,6 +1440,14 @@ function autoName(colorName, category){
 function enrichItem(item){
   const inf = inferAttributes(item.name, item.category);
   if(item.category == null) item.category = inf.category;
+  /* A colour is a key everything else groups by, so a missing one surfaces as
+     the literal word "undefined" in the stats. colorByName already falls back
+     to grey when asked for something it does not know; this makes the item say
+     so rather than leaving a hole. Not reachable by typing -- the picker always
+     has a value -- but a hand-edited or truncated backup can carry one, which
+     is the same door the missing name below comes through. */
+  if(typeof item.color !== 'string' || !item.color) item.color = 'grey';
+  if(typeof item.name !== 'string') item.name = item.name == null ? '' : String(item.name);
   if(item.warmth == null || item.warmthAuto !== false)    { item.warmth = inf.warmth; }
   if(item.formality == null || item.formalityAuto !== false){ item.formality = inf.formality; }
   if(!Array.isArray(item.tags) || !item.tagsManual) item.tags = inf.tags;
@@ -1574,10 +1582,19 @@ async function loadAll(){
   if(prefs.layCut === false) state.layCut = false;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
-  /* Wardrobes saved before warmth/formality existed get them inferred now. */
+  /* Wardrobes saved before warmth/formality existed get them inferred now.
+     A missing name or colour counts too: enrichItem fills both, and without
+     this an item that has a warmth but no colour is never repaired, because
+     the only other place enrichItem runs over everything is on import. That
+     leaves a real door -- a wardrobe restored by an older version of the app,
+     then opened by this one -- through which a piece can arrive with a hole in
+     it and show up in the stats as the word "undefined". */
   let migrated = false;
   state.items.forEach(function(i){
-    if(i.warmth == null || i.formality == null){ enrichItem(i); migrated = true; }
+    if(i.warmth == null || i.formality == null
+       || typeof i.name !== 'string' || typeof i.color !== 'string' || !i.color){
+      enrichItem(i); migrated = true;
+    }
     if(i.createdAt == null){ i.createdAt = Date.now(); migrated = true; }
     /* An earlier version could paint over the stored photo, and on a busy
        background it did that badly -- blotches of white where a floor had
@@ -2747,7 +2764,13 @@ function imgSrc(item){
   if(!item.image || typeof item.image !== 'string' || item.image.slice(0,5) !== 'data:'){
     /* No usable photo — draw a colour block rather than a broken-image icon. */
     const hex = colorByName(item.color).hex;
-    const ch = escapeHtml(((item.name||'?').trim().charAt(0) || '?').toUpperCase());
+    /* The first *character*, not the first sixteen bits. charAt(0) of
+       "👟 sneakers" is half a surrogate pair, and encodeURIComponent throws
+       "URI malformed" on a lone surrogate -- which took the Wardrobe tab and
+       the Stats tab down with it. Naming a piece with an emoji in front is an
+       ordinary thing to do, so this was a real crash reachable by typing.
+       Array.from walks code points and hands back the whole emoji. */
+    const ch = escapeHtml((Array.from((item.name||'').trim())[0] || '?').toUpperCase());
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
       + '<rect width="100" height="100" fill="'+hex+'"/>'
       + '<text x="50" y="58" font-family="Georgia,serif" font-size="34" fill="rgba(0,0,0,0.35)" text-anchor="middle">'+ch+'</text></svg>';
