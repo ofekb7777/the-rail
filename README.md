@@ -402,6 +402,13 @@ It sits beside the lay-out rather than in Settings because it is a thing you
 judge by looking — you can see the cut is wrong, and the switch is right there
 under it.
 
+There is a second, narrower version of the same thing. Open any piece and there
+is *Or just show this one as a photo* under the marking box. The Today switch is
+the blunt instrument and answers "I do not want cut-outs"; this answers the far
+more common "that one came out wrong", which is a judgement about a single
+photograph and should not cost you the cut-outs that worked. Turning it back on
+is instant — the lifted copy is kept, not thrown away.
+
 ### Drawing a box round a piece
 
 Some photographs cannot be read automatically and no amount of tuning will
