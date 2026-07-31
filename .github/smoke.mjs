@@ -330,6 +330,29 @@ try {
       missed.push('a small piece was isolated away to nothing');
     }
 
+    // A photograph taken the way people actually take them: a garment put down
+    // on a patterned bed, with the frame edge showing bedding, a pillow and a
+    // cable. The border-based cut refuses this outright -- measured at 76
+    // against a limit of 46 on a real photo -- and everything downstream used
+    // to fail with it: the colour was read off the bedspread, no silhouette
+    // meant no category, and the lay-out showed a rectangle of duvet.
+    const onABed = mk((x) => {
+      x.fillStyle = '#cfc9bd'; x.fillRect(0, 0, 200, 200);          // bedding
+      x.fillStyle = '#7fa8bf'; x.fillRect(0, 0, 200, 18);           // a pillow at the top
+      x.strokeStyle = 'rgba(0,0,0,0.10)'; x.lineWidth = 5;          // quilting
+      for (let i = 0; i < 9; i++) { x.beginPath(); x.moveTo(i*26, 0); x.lineTo(i*26+30, 200); x.stroke(); }
+      x.fillStyle = '#ffffff'; x.fillRect(0, 176, 60, 5);           // a cable
+      x.fillStyle = '#232323'; x.fillRect(52, 40, 96, 118);         // the garment
+    });
+    const centre = subjectFromCentre(onABed);
+    if (!centre) missed.push('a garment on a patterned bed was not found from the centre');
+    else {
+      // the mask marks background, so the middle of the garment must NOT be masked
+      const w = onABed.width;
+      if (centre.mask[100 * w + 100]) missed.push('the centre detector masked the garment itself');
+      if (!centre.mask[4 * w + 4]) missed.push('the centre detector kept the bedding');
+    }
+
     const busy = mk((x) => {
       x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 200, 90);
       x.fillStyle = '#7d6a52'; x.fillRect(0, 90, 200, 110);
