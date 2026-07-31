@@ -359,6 +359,28 @@ try {
       if (!centre.mask[4 * w + 4]) missed.push('the centre detector kept the bedding');
     }
 
+    // The case that cost a fifth of a real shirt. The garment is lit from one
+    // side, so its far edge is mid-grey rather than black -- and the frame's
+    // corner holds a second dark garment, which makes "dark" a legitimate
+    // backdrop colour. The shaded half of the piece then matches the backdrop
+    // better than it matches its own middle, and is cut away.
+    const shadedWithClutter = mk((x) => {
+      x.fillStyle = '#cfc9bd'; x.fillRect(0, 0, 200, 200);        // the bed
+      x.fillStyle = '#4a4a52'; x.fillRect(150, 0, 50, 42);        // another dark piece, in shot
+      const g = x.createLinearGradient(46, 0, 154, 0);            // the garment, lit from the left
+      g.addColorStop(0, '#1c1c20'); g.addColorStop(1, '#57575f');
+      x.fillStyle = g; x.fillRect(46, 58, 108, 104);
+    });
+    const shaded = subjectFromCentre(shadedWithClutter);
+    if (!shaded) missed.push('a side-lit garment with clutter in the corner was not found at all');
+    else {
+      const w2 = shadedWithClutter.width;
+      // its shaded edge must survive, not just its black middle
+      if (shaded.mask[110 * w2 + 148]) missed.push('the shaded side of the garment was cut away');
+      if (shaded.mask[110 * w2 + 60]) missed.push('the lit side of the garment was cut away');
+      if (!shaded.mask[110 * w2 + 8]) missed.push('the bedding was kept');
+    }
+
     const busy = mk((x) => {
       x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 200, 90);
       x.fillStyle = '#7d6a52'; x.fillRect(0, 90, 200, 110);
