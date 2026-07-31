@@ -341,6 +341,39 @@ try {
   });
   for (const m of layMisses) failures.push(`laid out: ${m}`);
 
+  // A screen that asks you to add a piece has to let you add one. The
+  // floating button is display:none on every tab but Wardrobe, so Today --
+  // the tab the app opens on -- used to tell a brand new user to add pieces
+  // and give them nothing to press.
+  const deadEnds = await page.evaluate(async () => {
+    state.items = []; state.outfits = []; state.wearLog = []; state.plans = {};
+    const missed = [];
+    for (const t of ['today', 'plan', 'stats']) {
+      state.tab = t; render();
+      await new Promise((r) => setTimeout(r, 120));
+      const main = document.getElementById('main');
+      const fabShown = document.getElementById('fabWrap').style.display !== 'none';
+      if (/add/i.test(main.textContent) && !main.querySelector('[data-do]') && !fabShown) {
+        missed.push(`"${t}" asks for a piece with no way to add one`);
+      }
+    }
+    // and the button has to actually open the sheet
+    state.tab = 'today'; render();
+    await new Promise((r) => setTimeout(r, 120));
+    const btn = document.querySelector('#main [data-do="add"]');
+    if (!btn) missed.push('no add button on an empty Today');
+    else {
+      btn.click();
+      await new Promise((r) => setTimeout(r, 200));
+      if (!document.getElementById('addOverlay').classList.contains('open')) {
+        missed.push('the empty-state add button did not open the add sheet');
+      }
+      document.getElementById('addOverlay').classList.remove('open');
+    }
+    return missed;
+  });
+  for (const m of deadEnds) failures.push(`empty state: ${m}`);
+
   // index.html is the entry point a static host lands on; if its redirect
   // breaks, the live site is a blank page however healthy the app is.
   const entry = await page.goto(`${BASE}/`, { waitUntil: 'load' });

@@ -176,6 +176,22 @@
 
   .empty{ text-align:center; padding: 60px 20px; color:rgba(239,232,216,0.55); }
   .empty .mark{font-family:'Fraunces'; font-style:italic; font-size:20px; color:var(--bone); display:block; margin-bottom:8px;}
+  /* A screen that asks you to do something has to let you do it. The add
+     button lives on the Wardrobe tab only, so Today, Plan and Stats each said
+     "add some pieces" to a new user with nothing on screen to press -- and
+     Today is the tab the app opens on. */
+  .empty-do{
+    display:inline-block; margin-top:16px; background:var(--thread); color:var(--bone);
+    border:none; border-radius:50px; padding:11px 22px; cursor:pointer;
+    font-family:'Work Sans'; font-weight:700; font-size:13px; letter-spacing:0.2px;
+    box-shadow:0 6px 16px -6px rgba(0,0,0,0.5);
+    transition:transform var(--press), filter var(--press);
+  }
+  .empty-do:active{transform:scale(0.97); filter:brightness(0.94);}
+  .empty-do.quiet{
+    background:transparent; color:var(--bone);
+    box-shadow:none; border:1px solid var(--line); font-weight:600;
+  }
 
   /* ---- section furniture ---- */
   .sec-head{
@@ -1053,7 +1069,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.14';
+const APP_VERSION = '2026.08.15';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -3558,7 +3574,8 @@ function suggestRepeat(){
 function renderToday(){
   if(state.items.length === 0){
     return '<div class="empty"><span class="mark">Welcome to your rail</span>'
-      + 'Add a few pieces and the app will start putting outfits together for you — no account, no internet, no AI.</div>';
+      + 'Add a few pieces and the app will start putting outfits together for you — no account, no internet, no AI.'
+      + '<div><button class="empty-do" data-do="add">＋ Add your first piece</button></div></div>';
   }
 
   const disabled = state.items.length < 2;
@@ -3863,7 +3880,8 @@ function renderStylistResults(){
 
 function renderSaved(){
   if(state.outfits.length===0){
-    return '<div class="empty"><span class="mark">Nothing saved yet</span>Looks you save from Today will show up here.</div>';
+    return '<div class="empty"><span class="mark">Nothing saved yet</span>Looks you save from Today will show up here.'
+      + '<div><button class="empty-do quiet" data-do="today">Go to Today</button></div></div>';
   }
   /* Reversed for display, so the index handed to the remove button is the
      one in the real array, not the one on screen. */
@@ -3933,7 +3951,8 @@ function dayEntry(key){
 
 function renderPlan(){
   if(state.items.length === 0){
-    return '<div class="empty"><span class="mark">Nothing to plan yet</span>Add some pieces to your wardrobe first.</div>';
+    return '<div class="empty"><span class="mark">Nothing to plan yet</span>Add some pieces to your wardrobe first.'
+      + '<div><button class="empty-do" data-do="add">＋ Add a piece</button></div></div>';
   }
   const m = calMonth();
   const year = m.getFullYear(), month = m.getMonth();
@@ -4108,7 +4127,8 @@ function suggestForDay(key, override){
    ============================================================ */
 function renderStats(){
   if(state.items.length === 0){
-    return '<div class="empty"><span class="mark">No numbers yet</span>Add pieces and log what you wear — the maths follows.</div>';
+    return '<div class="empty"><span class="mark">No numbers yet</span>Add pieces and log what you wear — the maths follows.'
+      + '<div><button class="empty-do" data-do="add">＋ Add a piece</button></div></div>';
   }
   const s = wardrobeStats();
 
@@ -6169,6 +6189,22 @@ function attachDynamicHandlers(){
   });
   document.querySelectorAll('[data-swap]').forEach(function(el){
     el.onclick = function(e){ e.stopPropagation(); openSwapSheet(el.dataset.swap); };
+  });
+
+  /* The way out of an empty screen. Deliberately the same two lines the
+     floating button runs rather than a click forwarded to it -- that button
+     is display:none on every tab but Wardrobe, and clicking a hidden element
+     is the kind of thing that works until it quietly does not. */
+  document.querySelectorAll('[data-do]').forEach(function(el){
+    el.onclick = function(){
+      if(el.dataset.do === 'add'){
+        resetDraft();
+        addOverlay.classList.add('open');
+      }else if(el.dataset.do === 'today'){
+        state.tab = 'today';
+        render();
+      }
+    };
   });
 
 
