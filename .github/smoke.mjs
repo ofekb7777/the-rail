@@ -621,6 +621,86 @@ try {
   });
   for (const m of cutMisses) failures.push(`cut switch: ${m}`);
 
+  // "What am I missing?" counts what the wardrobe can make, then works out
+  // which single piece would add the most. It is the largest untested thing in
+  // the file, and its failure mode is silence: an empty list of suggestions
+  // renders as an empty panel and looks like a considered answer rather than a
+  // broken one. So the test is that it produces advice at every size, not that
+  // the advice is any particular thing.
+  const gapMisses = await page.evaluate(async () => {
+    const missed = [];
+    const mk = (name, cat, color, warm, form) => ({
+      id: name.replace(/\s/g, '') + Math.random().toString(36).slice(2, 8),
+      name, category: cat, color, warmth: warm, formality: form,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    // Three is the smallest wardrobe the button will open on -- below that it
+    // refuses with a toast rather than analysing, so that is where to start.
+    const beds = {
+      'three pieces': [
+        mk('White tee', 'top', 'white', 2, 2),
+        mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('White trainers', 'footwear', 'white', 2, 2),
+      ],
+      'seven pieces': [
+        mk('White tee', 'top', 'white', 2, 2), mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('White trainers', 'footwear', 'white', 2, 2), mk('Black tee', 'top', 'black', 2, 2),
+        mk('Grey jumper', 'top', 'grey', 4, 2), mk('Black chinos', 'bottom', 'black', 3, 3),
+        mk('Brown boots', 'footwear', 'brown', 4, 3),
+      ],
+      // everything one colour, and nothing to put on your feet: the two shapes
+      // most likely to leave the scorer with nothing positive to say.
+      // Named the way a person would name them. That matters here: the
+      // "do not recommend what they already own" rule works on the words in
+      // the name, so a fixture of six things called "Black thing 3" defeats it
+      // and fails this test for a reason no real wardrobe would produce.
+      'all one colour': [
+        mk('Black tee', 'top', 'black', 2, 2), mk('Black jeans', 'bottom', 'black', 3, 2),
+        mk('Black boots', 'footwear', 'black', 4, 3), mk('Black hoodie', 'top', 'black', 3, 1),
+        mk('Black trousers', 'bottom', 'black', 3, 3), mk('Black trainers', 'footwear', 'black', 2, 1),
+      ],
+      'no shoes': [
+        mk('White tee', 'top', 'white', 2, 2), mk('Blue jeans', 'bottom', 'blue', 3, 2),
+        mk('Grey jumper', 'top', 'grey', 4, 2),
+      ],
+    };
+    for (const [label, items] of Object.entries(beds)) {
+      state.items = items;
+      let g;
+      try { g = analyseGaps(); }
+      catch (e) { missed.push(`${label}: analysis threw "${e.message}"`); continue; }
+      if (!g.gaps || !g.gaps.length) missed.push(`${label}: no suggestions at all`);
+      if (!g.summary) missed.push(`${label}: no summary line`);
+      // A suggestion with no reason is worse than none: the panel exists to
+      // explain itself, and "buy a grey jumper" unexplained is a horoscope.
+      (g.gaps || []).forEach((x) => {
+        if (!x.item) missed.push(`${label}: a suggestion with no name`);
+        if (!x.why) missed.push(`${label}: "${x.item}" was suggested with no reason`);
+        if (typeof x.unlocks !== 'number') missed.push(`${label}: "${x.item}" unlocks nothing countable`);
+      });
+      // Recommending what you already own is the fastest way to lose trust.
+      const owned = new Set(items.map((i) => i.category + '|' + i.color));
+      const dupe = (g.gaps || []).find((x) => owned.has(x.category + '|' + x.color)
+        && items.some((i) => i.category === x.category && i.color === x.color
+          && x.item.toLowerCase().split(/\s+/).filter((w) => w.length > 3)
+            .some((w) => i.name.toLowerCase().includes(w))));
+      if (dupe) missed.push(`${label}: suggested "${dupe.item}" which is already owned`);
+    }
+    // "no shoes" must be named as a blocker, not left to the suggestions --
+    // you cannot dress at all, and that is a different statement from advice.
+    state.items = beds['no shoes'];
+    const shoeless = analyseGaps();
+    if (!shoeless.blockers.length) missed.push('a wardrobe with no shoes reported nothing you cannot dress for');
+
+    // and on a real wardrobe it must still say something useful
+    await loadDemoWardrobe();
+    const demo = analyseGaps();
+    if (!demo.gaps.length) missed.push('the demo wardrobe produced no suggestions');
+    if (!(demo.baseCount > 0)) missed.push('the demo wardrobe counted no workable combinations');
+    return missed;
+  });
+  for (const m of gapMisses) failures.push(`gaps: ${m}`);
+
   // Written down is only half of it -- it has to be read back. Left off above,
   // so a reload here is the real test of that. Saving a setting that never
   // returns looks identical to saving it correctly until the next launch.
