@@ -2706,8 +2706,30 @@ async function processPhoto(file){
      freeing it. The lay-out does its own isolation at display time instead,
      where being wrong costs nothing but a plain-looking picture. */
   let cut = {applied:false};
-  try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
-  catch(e){ console.warn('backdrop read failed', e); }
+
+  /* The model first, if it is installed. Every colour this app still gets wrong
+     is a mask problem rather than a colour problem: a pale garment on a pale
+     surface, where the flood eats the garment and the reading is taken off
+     what is left. Measured across the 180 hardest renders -- nine neutrals on
+     four surfaces under five lighting conditions -- 168 read correctly with the
+     colour-based mask and 180 with the model's. Nothing that was right became
+     wrong.
+
+     Two of those twelve are black on a near-black surface under uneven light,
+     which is the failure issue #6 was opened for.
+
+     It costs two or three seconds a photograph, which is why it is only ever
+     the opt-in path. Without the model this returns null immediately and
+     everything below is exactly as it was. */
+  try{
+    const aiMask = await modelMask(drawToCanvas(img, 420));
+    if(aiMask) cut = {applied:true, mask:aiMask, shape:shapeFromMask(aiMask, work.width, work.height), viaModel:true};
+  }catch(e){ console.warn('the cut-out model failed', e); }
+
+  if(!cut.applied){
+    try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
+    catch(e){ console.warn('backdrop read failed', e); }
+  }
 
   /* The edge told us nothing -- a bed, a desk, a hand in shot. Look from the
      middle out instead, which is where the thing you photographed is. */
@@ -5748,6 +5770,41 @@ async function modelMask(canvas){
      have its turn than to hand back an empty cut-out. */
   if(kept/(w*h) < 0.005) return null;
   return mask;
+}
+
+/* The silhouette, described the way the category guess wants it: how tall
+   against how wide, how much of the frame, where it sits, and how much of its
+   own bounding box it fills. Measured on the largest island rather than on
+   every kept pixel, so a speck of something else in shot cannot stretch the
+   bounding box and make a shoe look like a pair of trousers. */
+function shapeFromMask(mask, w, h){
+  const seen = new Uint8Array(w*h);
+  let best = null;
+  for(let s=0; s<w*h; s++){
+    if(mask[s] || seen[s]) continue;
+    let area=0, x0=w, y0=h, x1=-1, y1=-1;
+    const stack = [s];
+    seen[s] = 1;
+    while(stack.length){
+      const idx = stack.pop();
+      const x = idx % w, y = (idx-x)/w;
+      area++;
+      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      if(x>0   && !mask[idx-1] && !seen[idx-1]){ seen[idx-1]=1; stack.push(idx-1); }
+      if(x<w-1 && !mask[idx+1] && !seen[idx+1]){ seen[idx+1]=1; stack.push(idx+1); }
+      if(y>0   && !mask[idx-w] && !seen[idx-w]){ seen[idx-w]=1; stack.push(idx-w); }
+      if(y<h-1 && !mask[idx+w] && !seen[idx+w]){ seen[idx+w]=1; stack.push(idx+w); }
+    }
+    if(!best || area > best.area) best = {area:area, x0:x0, y0:y0, x1:x1, y1:y1};
+  }
+  if(!best) return null;
+  const bw = best.x1-best.x0+1, bh = best.y1-best.y0+1;
+  return {
+    area: best.area/(w*h),
+    aspect: bh / Math.max(1, bw),
+    midY: ((best.y0+best.y1)/2) / h,
+    fill: best.area / Math.max(1, bw*bh)
+  };
 }
 
 /* A mask, small enough to keep. Stored as a PNG at the model's own 320 square
