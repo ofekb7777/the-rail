@@ -1218,6 +1218,46 @@ try {
         if (d2[(5 * 300 + 5) * 4 + 3] > 128) missed.push('the restored mask kept the backdrop');
       }
     }
+    // The reason the model is wired into the colour reader at all. A white
+    // garment on a white sheet, under texture and falloff and a cast shadow at
+    // once, reads *grey* off the colour-based mask -- the flood eats the
+    // garment and the reading comes off what is left. It is the shape of every
+    // colour failure that survived a night of tuning.
+    //
+    // Measured across all 180 of the hard renders: 168 right without the model
+    // and 180 with it. This is one of the twelve, kept as the sentinel, because
+    // running all 180 here would add ten minutes to the build.
+    const hard = (() => {
+      const W = 560, cv = document.createElement('canvas');
+      cv.width = cv.height = W;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.fillStyle = '#f4f4f2'; g.fillRect(0, 0, W, W);
+      const im = g.getImageData(0, 0, W, W), dd = im.data;
+      let s = 7;
+      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      for (let i = 0; i < dd.length; i += 4) { const n = (rnd() - 0.5) * 26; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
+      g.putImageData(im, 0, 0);
+      const grad = g.createLinearGradient(0, 0, W, W);
+      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.34)');
+      g.fillStyle = grad; g.fillRect(0, 0, W, W);
+      g.save();
+      g.globalAlpha = 0.35; g.filter = 'blur(18px)'; g.fillStyle = '#000';
+      g.beginPath(); g.ellipse(W * 0.5, W * 0.76, W * 0.34, W * 0.09, 0, 0, 7); g.fill();
+      g.restore();
+      const S = 400, l = document.createElement('canvas');
+      l.width = l.height = S;
+      DEMO_SHAPES.top(l.getContext('2d'), colorByName('white').hex, S, S, {});
+      const side = Math.round(W * 0.6);
+      g.drawImage(l, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
+      return cv;
+    })();
+    const file = await new Promise((r) => hard.toBlob((b) => r(new File([b], 'h.png', { type: 'image/png' })), 'image/png'));
+    const read = await processPhoto(file);
+    const got = read.colors.length ? read.colors[0].name : '(nothing)';
+    if (got !== 'white') {
+      missed.push(`with the model installed, a white garment on a white sheet still read as "${got}"`);
+    }
+
     // removing it must take the cache *and* the masks it produced
     state.items = state.items.slice(0, 2);
     state.items.forEach((i) => { i.aiMask = 'data:image/png;base64,x'; });

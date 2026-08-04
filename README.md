@@ -225,10 +225,14 @@ read off the shadow and the shirt came back **grey**. The shadow is now
 recognised as the surface dimmed rather than a thing lying on it. Silver, beige
 and white on pale surfaces all read correctly now.
 
-The remainder is honest ambiguity: a white shirt on a white sheet under uneven
-light is genuinely hard to separate, and a person looking at the same pixels
-would hesitate too. Photograph pale clothes on something darker — see the list
-above — or draw a box round the piece, which re-reads the colour from inside it.
+The remainder is honest ambiguity *for a method that works on colours alone*: a
+white shirt on a white sheet under uneven light cannot be separated by measuring
+its edges, and a person looking only at those pixels would hesitate too.
+Photograph pale clothes on something darker — see the list above — or draw a box
+round the piece, which re-reads the colour from inside it.
+
+Or turn on **Smart cut-out**, which recognises the garment rather than measuring
+around it and gets all 180 of those cases right. See below.
 
 One thing worth knowing about how it fails. When the app *can* separate the
 piece, it gets the colour right; when it cannot, it used to judge the colour off
@@ -446,6 +450,27 @@ once downloaded it works with no signal.
 | ONNX Runtime Web (WASM + loader) | 13.6 MB | MIT |
 
 Nothing was trained here. These are published weights, used as published.
+
+**It fixes the colour too, which was the bigger surprise.** Every colour reading
+this app still got wrong was a *mask* problem rather than a colour problem: a
+pale garment on a pale surface, where the flood eats the garment and the reading
+is taken off whatever is left standing. Handing the colour reader the model's
+mask instead, across the same 180 hard renders — nine neutrals over four
+surfaces under five lighting conditions:
+
+| | correct |
+|---|---|
+| the colour-based mask | 168 / 180 |
+| the model's mask | **180 / 180** |
+
+Nothing that was right became wrong, and the same numbers hold measured through
+the real import path rather than the mask alone. Two of the twelve it fixes are
+**black on a near-black surface under uneven light** — the failure issue #6 was
+opened for, which could not be reproduced in flat light and turns out to have
+been alive in uneven light all along.
+
+The silhouette goes to the category guess as well, and that stays correct on
+every shape under every condition.
 
 **What it costs.** Two to three seconds per piece, once — the mask is kept with
 the piece as a small PNG (6–7 KB measured) so it never runs twice, and it
