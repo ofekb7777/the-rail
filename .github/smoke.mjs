@@ -1145,6 +1145,89 @@ try {
   });
   for (const m of swapWearMisses) failures.push(`swap and wear: ${m}`);
 
+  // The smart cut-out: an 18 MB segmentation model that is *off* unless asked
+  // for. The thing most worth protecting is not that it works -- it is that the
+  // app is untouched without it. Someone who never presses the button must not
+  // pay a byte or lose a feature, and every other test in this file runs in
+  // exactly that state, so they are the evidence for the second half.
+  //
+  // What is checked here is the first half: the files exist to be fetched, the
+  // app does not reach for them on its own, and installing and removing does
+  // what it says.
+  const aiMisses = await page.evaluate(async () => {
+    const missed = [];
+    if (typeof modelInstalled !== 'function') return ['the smart cut-out is not wired in at all'];
+    if (await modelInstalled()) missed.push('the model was already installed on a fresh profile');
+    // it must not have been loaded, either -- ensureModel returns null rather
+    // than fetching 18 MB behind someone's back
+    if (await ensureModel()) missed.push('the model loaded without having been installed');
+    // and the cut-out must still work without it
+    const c = document.createElement('canvas');
+    c.width = c.height = 200;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.fillStyle = '#d8d3c7'; x.fillRect(0, 0, 200, 200);
+    x.fillStyle = '#2f3d66'; x.fillRect(55, 45, 90, 110);
+    if (!isolateForLayout(c)) missed.push('the colour-based cut stopped working when the model is absent');
+    if (await modelMask(document.createElement('canvas'))) missed.push('modelMask answered without a model');
+    return missed;
+  });
+  for (const m of aiMisses) failures.push(`smart cut-out: ${m}`);
+
+  // The files themselves. A 404 here would mean the button offers a download
+  // that cannot complete, which is only discoverable by pressing it.
+  for (const f of ['ai/u2netp.onnx', 'ai/ort.wasm.bundle.min.mjs',
+    'ai/ort-wasm-simd-threaded.wasm', 'ai/ort-wasm-simd-threaded.mjs',
+    'ai/LICENSE-u2net.txt', 'ai/LICENSE-onnxruntime.txt']) {
+    const res = await page.request.head(`${BASE}/${f}`);
+    if (!res.ok()) failures.push(`smart cut-out: ${f} is not there to download (${res.status()})`);
+  }
+
+  // Installing, using and removing it. Slow -- the model really does run -- but
+  // this is the one path that touches storage the user cannot see, and getting
+  // removal wrong leaves 18 MB behind for good.
+  const aiLive = await page.evaluate(async () => {
+    const missed = [];
+    try { await installModel(); } catch (e) { return [`install failed: "${e.message}"`]; }
+    if (!(await modelInstalled())) missed.push('it reported installed but the files are not in the cache');
+    const sess = await ensureModel();
+    if (!sess) return missed.concat('the model would not start after installing');
+
+    // a garment on a plain surface: the mask must find it and mark the rest
+    const c = document.createElement('canvas');
+    c.width = c.height = 300;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.fillStyle = '#d8d3c7'; x.fillRect(0, 0, 300, 300);
+    x.fillStyle = '#2f3d66'; x.fillRect(90, 70, 120, 160);
+    const m = await modelMask(c);
+    if (!m) missed.push('the model found nothing in a plain photo of a garment');
+    else {
+      if (m[150 * 300 + 150]) missed.push('the model marked the middle of the garment as background');
+      if (!m[5 * 300 + 5]) missed.push('the model kept the corner of the backdrop');
+      // and the round trip through storage has to preserve it
+      const png = maskToPng(m, 300, 300);
+      if (!png || png.slice(0, 15) !== 'data:image/png;') missed.push('the mask did not become a PNG');
+      else if (png.length > 60000) missed.push(`a stored mask is ${Math.round(png.length / 1024)}KB, which is too much per piece`);
+      const c2 = document.createElement('canvas');
+      c2.width = c2.height = 300;
+      const x2 = c2.getContext('2d');
+      x2.fillStyle = '#2f3d66'; x2.fillRect(0, 0, 300, 300);
+      if (!(await applyMaskPng(c2, png))) missed.push('a stored mask could not be put back');
+      else {
+        const d2 = c2.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 300, 300).data;
+        if (d2[(150 * 300 + 150) * 4 + 3] < 128) missed.push('the restored mask cut away the garment');
+        if (d2[(5 * 300 + 5) * 4 + 3] > 128) missed.push('the restored mask kept the backdrop');
+      }
+    }
+    // removing it must take the cache *and* the masks it produced
+    state.items = state.items.slice(0, 2);
+    state.items.forEach((i) => { i.aiMask = 'data:image/png;base64,x'; });
+    await removeModel();
+    if (await modelInstalled()) missed.push('removing it left the files in the cache');
+    if (state.items.some((i) => i.aiMask)) missed.push('removing it left its masks on the pieces');
+    return missed;
+  });
+  for (const m of aiLive) failures.push(`smart cut-out: ${m}`);
+
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
   // the file, and its failure mode is silence: an empty list of suggestions

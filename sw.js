@@ -11,7 +11,7 @@
 /* The cache is named for the version it holds, so publishing a new one
    retires the old cache instead of layering on top of it. Keep in step with
    APP_VERSION in the-rail.html and version.json -- CI checks that they agree. */
-const VERSION = '2026.08.30';
+const VERSION = '2026.09.01';
 const CACHE = 'the-rail-' + VERSION;
 /* The fonts belong in here now that they are served from beside the app. They
    used to come from Google, and the fetch handler below deliberately leaves
@@ -26,6 +26,17 @@ const SHELL = [
   './fonts/fraunces-italic-latin.woff2',
   './fonts/work-sans-latin.woff2'
 ];
+
+/* The smart cut-out model lives in its own cache, and that is the whole point
+   of the name. Every release retires the version cache above and builds a new
+   one; the model is 18 MB, and putting it there would mean re-downloading 18 MB
+   on every update -- over mobile data, for a file that has not changed.
+
+   So it is kept out of the version cache entirely: the fetch handler below
+   refuses to write anything under ai/ into it, and the activate handler above
+   is careful to keep this one. It is written once, by the button in Settings,
+   and removed by the button in Settings. */
+const MODEL_CACHE = 'the-rail-model-v1';
 
 self.addEventListener('install', function(e){
   /* Pre-caching must not fail the install just because one URL 404s on a
@@ -42,7 +53,8 @@ self.addEventListener('activate', function(e){
     caches.keys()
       .then(function(keys){
         return Promise.all(keys.map(function(k){
-          return k === CACHE ? null : caches.delete(k);
+          if(k === CACHE || k === MODEL_CACHE) return null;
+          return caches.delete(k);
         }));
       })
       .then(function(){ return self.clients.claim(); })
@@ -62,6 +74,21 @@ self.addEventListener('fetch', function(e){
      either, or every check would leave another entry behind. */
   if(url.pathname.endsWith('/version.json')){
     e.respondWith(fetch(req));
+    return;
+  }
+
+  /* The model, and the runtime that runs it. Cache first, and never written
+     into the version cache -- see MODEL_CACHE above. Cache first rather than
+     network first because these files never change: the app's own file is
+     edited constantly and must not be served stale, but a 13 MB WebAssembly
+     build of ONNX Runtime is the same bytes forever, and going to the network
+     for it on every launch would be 18 MB of nothing. */
+  if(url.pathname.indexOf('/ai/') > -1){
+    e.respondWith(
+      caches.match(req).then(function(hit){
+        return hit || fetch(req);
+      })
+    );
     return;
   }
 
