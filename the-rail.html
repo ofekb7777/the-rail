@@ -1145,7 +1145,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.08.30';
+const APP_VERSION = '2026.09.01';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -5589,6 +5589,214 @@ function renderBatchQueue(){
    edit to it. */
 const _layCache = new Map();
 
+/* ============================================================
+   THE SMART CUT-OUT
+   A segmentation model, off by default and downloaded only if you ask for it.
+
+   Everything above this line is arithmetic on colours: measure the border,
+   decide what is backdrop, flood inward. That works on a garment put down on
+   something plain and cannot be made to work on a white trainer held up in a
+   lit room, because a white shoe and a cream desk are the same colour with no
+   edge between them. Measured on exactly that photograph, the flood fill
+   refuses outright while the model cuts the shoe and takes the hand holding it
+   off as well.
+
+   So it earns its place -- but it is 18 MB, against an app of about 330 KB, and
+   that is a real cost to hand someone who never asked for it. Hence: nothing
+   here is fetched until the button in Settings is pressed, and the app is
+   built to be complete without it.
+
+   The files sit in ai/ and are served from this origin like everything else.
+   The service worker keeps them in a cache of their own so that publishing a
+   new version of the app does not throw them away.
+   ============================================================ */
+const MODEL_FILES = [
+  './ai/ort.wasm.bundle.min.mjs',
+  './ai/ort-wasm-simd-threaded.mjs',
+  './ai/ort-wasm-simd-threaded.wasm',
+  './ai/u2netp.onnx'
+];
+const MODEL_CACHE = 'the-rail-model-v1';
+const MODEL_BYTES = 18200000;          /* what to warn about, roughly */
+const MODEL_SIDE  = 320;               /* what u2netp expects */
+
+let _ortSession = null;                /* the loaded model, once per page */
+let _ortLoading = null;
+
+/* Is it already downloaded? Asked of the cache rather than remembered in a
+   setting, so it cannot claim to be there when the browser has evicted it. */
+async function modelInstalled(){
+  try{
+    if(!self.caches) return false;
+    const c = await caches.open(MODEL_CACHE);
+    for(let i=0;i<MODEL_FILES.length;i++){
+      if(!(await c.match(MODEL_FILES[i]))) return false;
+    }
+    return true;
+  }catch(e){ return false; }
+}
+
+/* Download it. onProgress is called with a fraction so the button can show
+   something -- 18 MB over a phone connection is long enough that a silent
+   button looks broken. */
+async function installModel(onProgress){
+  if(!self.caches) throw new Error('This browser has no cache storage to keep it in.');
+  const c = await caches.open(MODEL_CACHE);
+  let done = 0;
+  for(let i=0;i<MODEL_FILES.length;i++){
+    const url = MODEL_FILES[i];
+    if(!(await c.match(url))){
+      const res = await fetch(url, {cache:'reload'});
+      if(!res.ok) throw new Error('Could not fetch ' + url + ' (' + res.status + ')');
+      await c.put(url, res.clone());
+    }
+    done++;
+    if(onProgress) onProgress(done/MODEL_FILES.length);
+  }
+  return true;
+}
+
+async function removeModel(){
+  _ortSession = null; _ortLoading = null;
+  try{ await caches.delete(MODEL_CACHE); }catch(e){}
+  /* Masks already worked out came from the model, so they go too -- otherwise
+     turning it off would leave its results behind and look like it had not. */
+  state.items.forEach(function(i){ delete i.aiMask; });
+  _layCache.clear();
+  await saveItems();
+}
+
+/* Load the model into memory. Returns null rather than throwing when it is not
+   installed, because "not installed" is the ordinary case, not a fault. */
+async function ensureModel(){
+  if(_ortSession) return _ortSession;
+  if(_ortLoading) return _ortLoading;
+  if(!(await modelInstalled())) return null;
+  _ortLoading = (async function(){
+    try{
+      const ort = await import('./ai/ort.wasm.bundle.min.mjs');
+      /* An absolute URL, not './ai/'. The runtime resolves this against its own
+         module URL rather than the document's, so a relative path here asked
+         for /ai/ai/ and 404'd. */
+      ort.env.wasm.wasmPaths = new URL('./ai/', location.href).href;
+      /* One thread. Threads need cross-origin isolation, which needs headers a
+         static host will not send, and a wardrobe is a handful of photographs
+         rather than a video stream. */
+      ort.env.wasm.numThreads = 1;
+      _ortSession = await ort.InferenceSession.create('./ai/u2netp.onnx', {executionProviders:['wasm']});
+      _ortSession.__ort = ort;
+      return _ortSession;
+    }catch(e){
+      console.warn('the cut-out model would not load', e);
+      _ortLoading = null;
+      return null;
+    }
+  })();
+  return _ortLoading;
+}
+
+/* Run it over one canvas. Gives back a Uint8Array the same shape as the
+   canvas, marking *background* -- the same convention every other mask in this
+   file uses, so it drops straight into the existing code. Null if the model is
+   not there. */
+async function modelMask(canvas){
+  const sess = await ensureModel();
+  if(!sess) return null;
+  const ort = sess.__ort;
+  const S = MODEL_SIDE;
+  const small = document.createElement('canvas');
+  small.width = S; small.height = S;
+  small.getContext('2d').drawImage(canvas, 0, 0, S, S);
+  const d = small.getContext('2d', {willReadFrequently:true}).getImageData(0,0,S,S).data;
+
+  /* The normalisation u2net was trained with, including the divide by the
+     image's own maximum. That last step is not decoration: on a dark
+     photograph it is the difference between a silhouette and a grey smear. */
+  const MEAN = [0.485,0.456,0.406], STD = [0.229,0.224,0.225];
+  let mx = 0;
+  for(let i=0;i<d.length;i+=4){ if(d[i]>mx)mx=d[i]; if(d[i+1]>mx)mx=d[i+1]; if(d[i+2]>mx)mx=d[i+2]; }
+  mx = mx || 255;
+  const f = new Float32Array(3*S*S);
+  for(let p=0;p<S*S;p++){
+    for(let ch=0;ch<3;ch++) f[ch*S*S+p] = ((d[p*4+ch]/mx) - MEAN[ch]) / STD[ch];
+  }
+
+  let out;
+  try{
+    out = await sess.run({[sess.inputNames[0]]: new ort.Tensor('float32', f, [1,3,S,S])});
+  }catch(e){
+    console.warn('the cut-out model failed on this photo', e);
+    return null;
+  }
+  const raw = out[sess.outputNames[0]].data;    /* d0, the fused output */
+  let lo = Infinity, hi = -Infinity;
+  for(let i=0;i<raw.length;i++){ if(raw[i]<lo)lo=raw[i]; if(raw[i]>hi)hi=raw[i]; }
+  const span = (hi-lo) || 1;
+
+  const w = canvas.width, h = canvas.height;
+  const mask = new Uint8Array(w*h);
+  let kept = 0;
+  for(let y=0;y<h;y++){
+    const sy = Math.min(S-1, (y/h*S)|0);
+    for(let x=0;x<w;x++){
+      const sx = Math.min(S-1, (x/w*S)|0);
+      const v = (raw[sy*S+sx]-lo)/span;
+      if(v > 0.5) kept++; else mask[y*w+x] = 1;
+    }
+  }
+  /* It found nothing worth keeping. Better to say so and let the older reading
+     have its turn than to hand back an empty cut-out. */
+  if(kept/(w*h) < 0.005) return null;
+  return mask;
+}
+
+/* A mask, small enough to keep. Stored as a PNG at the model's own 320 square
+   rather than as raw bits: a silhouette is one big shape, which PNG compresses
+   to a few kilobytes, where the same thing packed bit-by-bit is seventeen. It
+   is worth keeping at all because the model takes a couple of seconds, which is
+   fine once and irritating on every visit to the tab. */
+function maskToPng(mask, w, h){
+  const S = MODEL_SIDE;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  const im = ctx.createImageData(S, S);
+  for(let y=0;y<S;y++){
+    const sy = Math.min(h-1, (y/S*h)|0);
+    for(let x=0;x<S;x++){
+      const sx = Math.min(w-1, (x/S*w)|0);
+      const v = mask[sy*w+sx] ? 0 : 255;      /* white is the piece */
+      const p = (y*S+x)*4;
+      im.data[p] = im.data[p+1] = im.data[p+2] = v;
+      im.data[p+3] = 255;
+    }
+  }
+  ctx.putImageData(im, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+/* Put a stored mask back onto a photo. False if it cannot be read, so the
+   caller falls back to the colour-based cut rather than showing nothing. */
+async function applyMaskPng(canvas, dataUrl){
+  let img;
+  try{ img = await loadImageFromDataUrl(dataUrl); }
+  catch(e){ return false; }
+  const w = canvas.width, h = canvas.height;
+  const m = document.createElement('canvas');
+  m.width = w; m.height = h;
+  m.getContext('2d').drawImage(img, 0, 0, w, h);
+  const md = m.getContext('2d', {willReadFrequently:true}).getImageData(0,0,w,h).data;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const im = ctx.getImageData(0,0,w,h);
+  for(let i=0;i<w*h;i++){
+    /* Scaling a hard-edged mask up smooths its border, which is exactly what
+       is wanted -- the edge lands between the two rather than on a staircase. */
+    im.data[i*4+3] = md[i*4];
+  }
+  ctx.putImageData(im, 0, 0);
+  return true;
+}
+
 function isolateForLayout(canvas){
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
@@ -5822,9 +6030,28 @@ async function enhanceLayImages(){
     try{
       const img = await loadImageFromDataUrl(item.image);
       const c = drawToCanvas(img, 420);
-      const url = liftForLayout(c, item.cutMark)
-        ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png')
-        : null;
+      let cut = false;
+
+      /* The model first, when it is installed. Its answer is remembered on the
+         piece, because two seconds is fine once and irritating on every visit
+         to the tab -- and because it means turning the lay-out off and on again
+         costs nothing.
+
+         Kept at the model's own 320 square rather than at the canvas size: it
+         is what the model produced, it is a twentieth of the storage, and it
+         scales back up perfectly well for a silhouette. */
+      if(!item.cutMark){
+        if(!item.aiMask && await ensureModel()){
+          const m = await modelMask(c);
+          if(m){ item.aiMask = maskToPng(m, c.width, c.height); await saveItems(); }
+        }
+        if(item.aiMask) cut = await applyMaskPng(c, item.aiMask);
+      }
+      /* No model, or it found nothing, or you drew a box -- which outranks it,
+         having been drawn precisely because something was wrong. */
+      if(!cut) cut = liftForLayout(c, item.cutMark);
+
+      const url = cut ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png') : null;
       _layCache.set(id, url);
       settle(url);
     }catch(e){
@@ -6720,12 +6947,27 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
+    +   '<div class="sb-title">Smart cut-out</div>'
+    +   '<div class="sb-sub">The lay-out lifts each piece off its background by measuring colours, '
+    +     'which works on a garment put down on something plain and gives up on a white shoe held over '
+    +     'a cream desk &mdash; they are the same colour with no edge between them. '
+    +     'This downloads a model that recognises the piece itself instead. '
+    +     'It runs on your phone, like everything else here: nothing is uploaded, and once downloaded it works offline.'
+    +   '</div>'
+    +   '<div class="sb-stat" id="modelState">Checking&hellip;</div>'
+    +   '<div id="modelActions"></div>'
+    + '</div>'
+
+    + '<div class="settings-block">'
     +   '<div class="sb-title">How this works</div>'
-    +   '<div class="sb-sub">There is no AI in this app and no account behind it. '
+    +   '<div class="sb-sub">No account, no server, and not one request to anyone &mdash; the typefaces '
+    +     'are served from beside the app rather than from Google. '
     +     'Colours are measured directly off your photos, categories come from a keyword dictionary, '
     +     'and outfits are scored on colour harmony, formality, warmth, how recently you wore things, '
-    +     'and which pieces you have worn together before. '
-    +     'It asks no server anything about your clothes; the only thing it fetches is the web font it is set in.'
+    +     'and which pieces you have worn together before. None of that is a model; it is arithmetic '
+    +     'you could check by hand. '
+    +     'The one exception is the cut-out above, which is a real model, is off unless you turn it on, '
+    +     'and still never sends a photograph anywhere.'
     +   '</div>'
     +   '<div class="sb-stat">Right now: '+countGoodLooks(null)+' workable combinations from '+stats.count+' pieces.</div>'
     + '</div>'
@@ -6767,7 +7009,59 @@ function renderSettingsBody(){
   bindSettingsHandlers();
 }
 
+/* The smart cut-out's corner of Settings. Drawn from what is actually in the
+   cache rather than from a stored setting, so it cannot claim the model is
+   installed after the browser has evicted it. */
+async function renderModelBlock(){
+  const state1 = document.getElementById('modelState');
+  const acts = document.getElementById('modelActions');
+  if(!state1 || !acts) return;
+  const mb = Math.round(MODEL_BYTES/1e6);
+  if(!self.caches){
+    state1.textContent = 'This browser cannot store it, so it is unavailable here.';
+    acts.innerHTML = '';
+    return;
+  }
+  const on = await modelInstalled();
+  const cut = state.items.filter(function(i){ return i.aiMask; }).length;
+  state1.textContent = on
+    ? 'Installed. ' + (cut ? cut + ' of ' + state.items.length + ' pieces read by it so far.'
+                           : 'It will read each piece the first time you see it laid out.')
+    : 'Not installed. About ' + mb + ' MB, downloaded once and kept for offline.';
+  acts.innerHTML = on
+    ? '<button class="btn-secondary" id="modelRemoveBtn" style="margin-top:10px;">Remove it</button>'
+    : '<button class="btn-primary" id="modelGetBtn" style="margin-top:10px;">Download it (' + mb + ' MB)</button>';
+
+  const get = document.getElementById('modelGetBtn');
+  if(get) get.onclick = async function(){
+    get.disabled = true;
+    try{
+      await installModel(function(f){ get.textContent = 'Downloading… ' + Math.round(f*100) + '%'; });
+      get.textContent = 'Warming it up…';
+      /* Load it here rather than on the next lay-out, so any problem shows up
+         while you are still looking at the button that caused it. */
+      const ok = await ensureModel();
+      _layCache.clear();
+      toast(ok ? 'Smart cut-out is on' : 'Downloaded, but it would not start');
+    }catch(e){
+      toast('Download failed — ' + e.message);
+    }
+    renderSettingsBody();
+  };
+  const rm = document.getElementById('modelRemoveBtn');
+  if(rm) rm.onclick = async function(){
+    if(!safeConfirm('Remove the smart cut-out? Pieces go back to the colour-based cut.', false)) return;
+    rm.disabled = true; rm.textContent = 'Removing…';
+    await removeModel();
+    toast('Removed');
+    renderSettingsBody();
+    render();
+  };
+}
+
 function bindSettingsHandlers(){
+  renderModelBlock();
+
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
 

@@ -420,6 +420,47 @@ A piece that could not be lifted at all is framed as a photograph — rounded,
 softly shadowed — rather than left as a bare square, so it reads as a picture of
 the thing on a table rather than a cut-out that went wrong.
 
+### The smart cut-out
+
+Everything described above is arithmetic on colours: measure the frame's border,
+decide what is backdrop, flood inward. It works on a garment put down on
+something plain, and it cannot be made to work on a **white trainer held up in a
+lit room** — a white shoe and a cream desk are the same colour with no edge
+between them. That case is why *Settings → Smart cut-out* exists.
+
+Measured on the two real photographs this app was tuned against:
+
+| | the colour-based cut | the model |
+|---|---|---|
+| black shirt on a bed | a strip of bedding down one side, fragments along the bottom | clean |
+| white trainer held in a room | **refuses outright** | cuts the shoe, and takes the hand holding it off too |
+
+It is **off by default and downloaded only if you ask**. The app is about 330 KB
+and complete without it; pressing the button fetches about 18 MB once. Nothing
+is uploaded, ever — the model runs on your phone like everything else here, and
+once downloaded it works with no signal.
+
+| File | Size | Licence |
+|---|---|---|
+| `u2netp.onnx` — U²-Net (small) | 4.6 MB | Apache 2.0 |
+| ONNX Runtime Web (WASM + loader) | 13.6 MB | MIT |
+
+Nothing was trained here. These are published weights, used as published.
+
+**What it costs.** Two to three seconds per piece, once — the mask is kept with
+the piece as a small PNG (6–7 KB measured) so it never runs twice, and it
+survives reloads. A box you have drawn still outranks it, because a box was
+drawn precisely when something was wrong.
+
+**Where it is kept.** In a cache of its own, not the one named for the app's
+version. Every release retires the version cache; putting 18 MB in there would
+mean re-downloading 18 MB on every update, over mobile data, for a file that has
+not changed. *Remove it* takes the files **and** the masks it produced — leaving
+its results behind would look like it had not been removed.
+
+The claim "there is no AI in this app" was true until this, and the Settings
+text now says so plainly rather than quietly going out of date.
+
 ### Turning the cut off
 
 Under the lay-out on **Today** there is a switch: *Pieces are cut out of their
