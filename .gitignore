@@ -15,7 +15,11 @@ desktop.ini
 .claude/
 
 # Playwright, installed on demand by the smoke test rather than depended on
+# Both spellings on purpose. The trailing slash matches a directory and not a
+# symlink, and running the smoke test locally is easiest with node_modules
+# symlinked at a global install -- which then showed up as untracked.
 node_modules/
+node_modules
 
 # Scratch harnesses used while tuning colour detection
 _gen.js
