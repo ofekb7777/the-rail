@@ -1348,6 +1348,86 @@ try {
   });
   for (const m of gapMisses) failures.push(`gaps: ${m}`);
 
+  // "What goes with what" -- four readings of how well the wardrobe connects to
+  // itself, all on trial and all marked TEST on screen. The numbers are the
+  // point of them, so the numbers are what is checked: a piece's count is how
+  // many workable looks it is actually in, and "never worn together" means the
+  // wear log really has no day holding all three.
+  const compatMisses = await page.evaluate(async () => {
+    const missed = [];
+    if (typeof compatibilityReport !== 'function') return ['it is not wired in at all'];
+    const mk = (name, cat, color, warm, form) => ({
+      id: name.replace(/\W/g, '') + Math.random().toString(36).slice(2, 7),
+      name, category: cat, color, warmth: warm, formality: form,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    // small enough to count by hand
+    const tee = mk('White tee', 'top', 'white', 2, 2);
+    const jumper = mk('Grey jumper', 'top', 'grey', 4, 2);
+    const jeans = mk('Blue jeans', 'bottom', 'blue', 3, 2);
+    const shoes = mk('White trainers', 'footwear', 'white', 2, 2);
+    state.items = [tee, jumper, jeans, shoes];
+    state.wearLog = []; state.outfits = []; state.plans = {};
+    _baseCache = null;
+
+    const r = compatibilityReport();
+    // every count must equal the number of looks that piece is really in
+    for (const e of r.ranked) {
+      const truth = r.unworn.concat([]).length >= 0
+        ? goodBases().filter((b) => b.some((i) => i.id === e.item.id)).length : -1;
+      if (e.n !== truth) missed.push(`${e.item.name} is reported in ${e.n} looks but is in ${truth}`);
+    }
+    if (r.ranked.some((e) => e.item.category === 'accessory')) {
+      missed.push('an accessory was ranked, though no look is built from one');
+    }
+    // with nothing worn, every workable look is a look never worn
+    if (r.unworn.length !== r.total) {
+      missed.push(`nothing has been worn, but only ${r.unworn.length} of ${r.total} count as never worn`);
+    }
+    // wear one of them and it must drop out
+    if (r.total) {
+      const first = r.unworn[0];
+      state.wearLog = [{ date: todayKey(), itemIds: first.map((i) => i.id), title: 'worn' }];
+      const r2 = compatibilityReport();
+      if (r2.unworn.length !== r.unworn.length - 1) {
+        missed.push(`wearing one look changed "never worn" from ${r.unworn.length} to ${r2.unworn.length}`);
+      }
+      if (r2.unworn.some((b) => b.map((i) => i.id).sort().join('|') === first.map((i) => i.id).sort().join('|'))) {
+        missed.push('a look that was worn is still listed as never worn');
+      }
+      // and it must still count when the day held more than those three
+      state.wearLog = [{ date: todayKey(), itemIds: first.map((i) => i.id).concat(['someBelt']), title: 'worn' }];
+      if (compatibilityReport().unworn.length !== r.unworn.length - 1) {
+        missed.push('a look worn with something extra on top was not recognised as worn');
+      }
+    }
+
+    // a piece that goes with nothing must say so, and be findable
+    const orphan = mk('Neon vest', 'top', 'teal', 1, 1);
+    state.items = [tee, jeans, shoes, orphan];
+    state.wearLog = [];
+    _baseCache = null;
+    const r3 = compatibilityReport();
+    const o = r3.ranked.find((e) => e.item.id === orphan.id);
+    if (!o) missed.push('a piece that connects to nothing was left out of the ranking entirely');
+
+    // the screen itself: every one of these is on trial and must say so
+    state.items = [tee, jumper, jeans, shoes];
+    _baseCache = null;
+    state.tab = 'stats';
+    render();
+    await new Promise((res) => setTimeout(res, 300));
+    const main = document.getElementById('main');
+    const tags = main.querySelectorAll('.test-tag').length;
+    if (!tags) missed.push('none of the trial sections is marked TEST on screen');
+    if (!main.querySelector('[data-try]')) missed.push('a look you have never worn offers no way to try it');
+    if (/NaN|undefined|Infinity/.test(main.textContent)) {
+      missed.push(`the section shows "${main.textContent.match(/.{0,26}(NaN|undefined|Infinity).{0,16}/)[0]}"`);
+    }
+    return missed;
+  });
+  for (const m of compatMisses) failures.push(`what goes with what: ${m}`);
+
   // Written down is only half of it -- it has to be read back. Saving a setting
   // that never returns looks identical to saving it correctly until the next
   // launch.

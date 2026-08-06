@@ -919,6 +919,28 @@
     border-top:1px solid var(--line); padding-top:12px; margin-top:14px;
   }
 
+  /* Marks a feature that is on trial rather than settled, so it is obvious
+     which parts of this screen are being judged and which are the app. */
+  .test-tag{
+    font-size:9px; font-weight:800; letter-spacing:0.9px; color:var(--mustard);
+    border:1px solid var(--mustard); border-radius:3px; padding:1px 5px;
+    margin-left:8px; flex:none; opacity:0.85;
+  }
+  /* A look you own but have never worn: three photographs and a way in. */
+  .combo-list{display:flex; flex-direction:column; gap:8px; margin-top:4px;}
+  .combo-row{
+    display:flex; align-items:center; gap:8px; width:100%; padding:8px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--line);
+    border-radius:10px; cursor:pointer; font-family:'Work Sans';
+    transition:background var(--settle);
+  }
+  .combo-row:active{background:rgba(255,255,255,0.09);}
+  .combo-row img{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#fff;flex:none;}
+  .combo-go{
+    margin-left:auto; font-size:11px; font-weight:700; color:var(--mustard);
+    letter-spacing:0.3px; padding-right:4px;
+  }
+
   /* ================= BUILDER ================= */
   .bld-slots{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px;}
   .bld-slot{
@@ -1145,7 +1167,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.02';
+const APP_VERSION = '2026.09.03';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -4819,7 +4841,174 @@ function renderStats(){
       + ' you own '+(s.never.length===1?'has':'have')+' never been worn.</div>'
     : '';
 
-  return cards + mostWornBlock + deadBlock + idleNote + catBlock + colBlock;
+  return cards + mostWornBlock + deadBlock + idleNote + catBlock + colBlock
+       + renderCompatibility();
+}
+
+/* ============================================================
+   WHAT GOES WITH WHAT  —  on trial
+   Four readings of the same thing: how well the wardrobe connects to itself.
+
+   The Stats above are about what you have *worn*. That is a different question
+   from what *works*, and the app has been quietly conflating them: a piece can
+   gather dust because you do not feel like it, or because it goes with nothing
+   you own. Only the second is a wardrobe problem, and nothing here could tell
+   them apart.
+
+   All four come from one pass over goodBases(), which is the list of workable
+   top/bottom/shoe combinations and is cached, so this costs one traversal
+   rather than four.
+   ============================================================ */
+function compatibilityReport(){
+  const bases = goodBases();
+  const total = bases.length;
+
+  /* how many workable looks each piece appears in */
+  const inLooks = {};
+  state.items.forEach(function(i){ inLooks[i.id] = 0; });
+  bases.forEach(function(b){
+    b.forEach(function(i){ inLooks[i.id] = (inLooks[i.id]||0) + 1; });
+  });
+
+  /* Only the three categories a look is actually built from. An accessory
+     appears in no base by construction, and listing every belt as "goes with
+     nothing" would be an artefact of how looks are counted, not a fact about
+     the belt. */
+  const body = state.items.filter(function(i){
+    return ['top','bottom','footwear'].indexOf(i.category) > -1;
+  });
+
+  const ranked = body.map(function(i){
+      return {item:i, n:inLooks[i.id]||0, share: total ? (inLooks[i.id]||0)/total : 0};
+    }).sort(function(a,b){ return b.n - a.n; });
+
+  /* Which of those looks you have never actually worn. A wear counts if a
+     logged day held all three pieces -- it may have had a coat over it. */
+  const wornSigs = {};
+  state.wearLog.forEach(function(w){
+    const ids = w.itemIds || [];
+    for(let a=0;a<ids.length;a++) for(let b=a+1;b<ids.length;b++) for(let c=b+1;c<ids.length;c++){
+      wornSigs[[ids[a],ids[b],ids[c]].slice().sort().join('|')] = true;
+    }
+  });
+  const unworn = bases.filter(function(b){
+    return !wornSigs[b.map(function(i){ return i.id; }).sort().join('|')];
+  });
+
+  /* goodBases only ever looks at the first 22 pieces in each category, so that
+     counting stays instant on a large wardrobe. Past that the totals below are
+     a sample rather than the truth, and saying "156 looks" when the real number
+     is several thousand would be a confident wrong answer -- the thing this app
+     tries hardest not to give. So the caller is told, and says so. */
+  const CAP = 22;
+  const capped = ['top','bottom','footwear'].some(function(c){
+    return state.items.filter(function(i){ return i.category===c; }).length > CAP;
+  });
+
+  return {total:total, ranked:ranked, unworn:unworn, inLooks:inLooks, capped:capped};
+}
+
+/* A short, honest reason a piece connects to little. Cheap: it asks what one
+   more piece of each category and colour would do, using the machinery the
+   "what am I missing" panel already uses. */
+function bridgeFor(item){
+  const need = item.category === 'top' ? 'bottom' : 'top';
+  const base = goodBases().length;
+  let best = null;
+  ['black','charcoal','navy','grey','white','beige','denim','brown'].forEach(function(cn){
+    const virt = {id:'__virt', name:cn+' '+need, category:need, color:cn,
+                  warmth:3, formality:3, tags:[]};
+    const n = countGoodLooks(virt) - base;
+    if(n > 0 && (!best || n > best.n)) best = {n:n, color:cn, cat:need};
+  });
+  return best;
+}
+
+function renderCompatibility(){
+  const body = state.items.filter(function(i){
+    return ['top','bottom','footwear'].indexOf(i.category) > -1;
+  });
+  if(body.length < 3) return '';
+  const r = compatibilityReport();
+  if(!r.total){
+    return '<div class="sec-head"><div class="sec-title">What goes with what</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">No complete look works yet, so there is nothing to measure. '
+      + 'A top, a bottom and a pair of shoes that go together is the smallest thing this can count.</div>';
+  }
+
+  const pct = function(x){ return Math.round(x*100); };
+  const row = function(e, extra){
+    return '<div class="rank-row" data-id="'+e.item.id+'">'
+      + '<img src="'+imgSrc(e.item)+'" loading="lazy" alt="">'
+      + '<div class="rank-meta"><div class="rank-name">'+escapeHtml(e.item.name)+'</div>'
+      + '<div class="rank-sub">'+escapeHtml(extra||(pct(e.share)+'% of your looks'))+'</div></div>'
+      + '<div class="rank-val">'+e.n+'</div></div>';
+  };
+
+  /* 1. the pieces holding the wardrobe together */
+  const anchors = r.ranked.slice(0, 3);
+  const many = r.capped
+    ? 'Counted over a sample of your wardrobe rather than all of it — past about twenty pieces in a category the real number runs into the thousands, so treat these as a ranking rather than a tally. '
+    : '';
+  const anchorBlock = '<div class="sec-head"><div class="sec-title">What goes with what</div>'
+    + '<span class="test-tag">TEST</span></div>'
+    + '<div class="stat-note">' + many + 'Of ' + r.total + ' complete looks '
+    + (r.capped ? 'counted' : 'your wardrobe can make') + ', '
+    + 'these turn up in the most. Losing one of them costs you more than losing anything else.</div>'
+    + '<div class="rank-list">' + anchors.map(function(e){ return row(e); }).join('') + '</div>';
+
+  /* 2. the pieces that barely connect, and what would rescue them */
+  const orphans = r.ranked.filter(function(e){ return e.share < 0.15; }).slice(-3).reverse();
+  let orphanBlock = '';
+  if(orphans.length){
+    orphanBlock = '<div class="sec-head"><div class="sec-title">Barely connects</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="rank-list">' + orphans.map(function(e){
+          const b = e.n === 0 ? bridgeFor(e.item) : null;
+          const sub = e.n === 0
+            ? (b ? 'in nothing — a ' + b.color + ' ' + (b.cat==='bottom'?'bottom':'top') + ' would put it in ' + b.n
+                 : 'in nothing that works')
+            : pct(e.share) + '% of your looks';
+          return row(e, sub);
+        }).join('') + '</div>';
+  }
+
+  /* 3. looks it can already make that you have never put on */
+  let unwornBlock = '';
+  if(r.unworn.length){
+    const show = r.unworn.slice(0, 3);
+    unwornBlock = '<div class="sec-head"><div class="sec-title">Never worn together</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">' + r.unworn.length + ' of those ' + r.total
+      + ' you have never actually worn. Nothing to buy — you already own all of it.</div>'
+      + '<div class="combo-list">' + show.map(function(b){
+          return '<button class="combo-row" data-try="'+b.map(function(i){ return i.id; }).join(',')+'">'
+            + b.map(function(i){ return '<img src="'+imgSrc(i)+'" loading="lazy" alt="">'; }).join('')
+            + '<span class="combo-go">try it →</span></button>';
+        }).join('') + '</div>';
+  }
+
+  /* 4. the other end of the same list */
+  const dead = r.ranked.filter(function(e){
+    if(e.n > 0) return false;
+    const worn = state.wearLog.some(function(w){ return (w.itemIds||[]).indexOf(e.item.id) > -1; });
+    return !worn;
+  });
+  let deadBlock2 = '';
+  if(dead.length){
+    deadBlock2 = '<div class="sec-head"><div class="sec-title">Worth reconsidering</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">In no working look, and never worn. That is not a verdict on the '
+      + 'piece — it may just need one thing to sit against, which is what the line under each says.</div>'
+      + '<div class="rank-list">' + dead.slice(0,3).map(function(e){
+          const b = bridgeFor(e.item);
+          return row(e, b ? 'a ' + b.color + ' ' + (b.cat==='bottom'?'bottom':'top') + ' would put it in ' + b.n + ' looks'
+                          : 'nothing obvious would rescue it');
+        }).join('') + '</div>';
+  }
+
+  return anchorBlock + orphanBlock + unwornBlock + deadBlock2;
 }
 
 function rankRow(r, val, cls, sub){
@@ -7465,6 +7654,15 @@ function attachDynamicHandlers(){
     state.tab = 'today';
     render();
     toast('Building around '+dusty.item.name);
+  });
+
+  /* A look you already own and have never worn. Opens it in the builder rather
+     than dropping it on Today, so you can look at it and change your mind --
+     it was never a suggestion, only an observation that you own the pieces. */
+  document.querySelectorAll('[data-try]').forEach(function(el){
+    el.onclick = function(){
+      openBuilder({seedIds: el.getAttribute('data-try').split(',')});
+    };
   });
 
   /* --- the deck of generated looks travels under your thumb --- */

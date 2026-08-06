@@ -315,6 +315,37 @@ with no shoes logged and got a card with a title, a percentage fit and no shoes
 on it, which reads as a finished answer rather than the best available one. It
 now says so on the card, with a way to add the missing pieces.
 
+### What goes with what — on trial
+
+Four blocks at the bottom of **Stats**, each marked `TEST` on screen, all of
+them provisional. They answer a question the rest of the app does not: not what
+you have *worn*, but what actually *works*.
+
+The distinction matters and the app had been quietly conflating the two. A piece
+gathers dust either because you do not feel like it or because it goes with
+nothing you own — only the second is a wardrobe problem, and nothing here could
+tell them apart. On the demo wardrobe the difference is immediate: a white
+oxford shirt sits in *Most worn* at six wears **and** in *Barely connects* at
+six looks out of 156. Worn constantly, works with almost nothing.
+
+| Block | What it says |
+|---|---|
+| **What goes with what** | the pieces appearing in the most workable looks — your anchors |
+| **Barely connects** | the pieces appearing in the fewest, and the one thing that would rescue each |
+| **Never worn together** | complete looks your wardrobe can already make and you have never put on — nothing to buy |
+| **Worth reconsidering** | in no working look *and* never worn, with what would fix it before you write it off |
+
+All four come from a single pass over the same cached list of workable
+combinations, so the whole section costs one traversal. Measured at 500 pieces:
+6 ms for the analysis, 147 ms for the entire Stats tab.
+
+**One honest limit.** The counter only ever looks at the first 22 pieces in each
+category, so that counting stays instant. Past that the totals are a sample
+rather than the truth, and the section says so rather than printing a confident
+wrong number — on a large wardrobe the real count runs into the thousands.
+
+These are on trial and may be removed. That is what the `TEST` tags are for.
+
 ### What else was swept, and found sound
 
 Recorded because a negative result is worth as much as a fix, and because it
