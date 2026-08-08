@@ -589,6 +589,14 @@
     display:none; pointer-events:none;
   }
   .mark-stage.cutting canvas{display:block;}
+  .cut-tools{display:flex; gap:8px; margin-top:9px;}
+  .cut-tool{
+    flex:1 1 0; min-width:0; background:rgba(255,255,255,0.05);
+    border:1px solid var(--line); border-radius:8px; color:rgba(239,232,216,0.72);
+    font-family:'Work Sans'; font-size:12px; font-weight:600; padding:8px 4px;
+    cursor:pointer; touch-action:manipulation; white-space:nowrap;
+  }
+  .cut-tool.on{background:var(--thread); border-color:var(--thread); color:#12141c;}
   .mark-stage.cutting img{visibility:hidden;}
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   @keyframes spin{to{transform:rotate(360deg);}}
@@ -1179,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.05';
+const APP_VERSION = '2026.09.06';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -5386,10 +5394,14 @@ function openDetail(id){
        photograph to find.
 
        This went through a tapped point, then a dragged box, then a segmentation
-       model, then a box and two brushes and a width picker. Every one of those
-       was another thing to understand before you could fix a picture. So it is
-       one gesture now: drag over what is not the piece. If it goes wrong, reset
-       and the app's own reading comes back. */
+       model, then a box and two brushes and a width picker. Most of that was
+       another thing to understand before you could fix a picture, and it went.
+
+       What came back is bringing back. Rubbing out alone means one careless
+       sweep across a hem costs you the whole mask, because reset is the only
+       way back -- and a brush you are afraid to use is worse than one more
+       button. Two, then, and no width picker and no undo: rub out, bring
+       back, reset. */
     + '<div class="mark-panel">'
     +   '<div class="mark-head">'
     +     '<span class="mark-title">'
@@ -5397,10 +5409,16 @@ function openDetail(id){
     +     '</span>'
     +     (item.handMask ? '<button class="mark-clear" id="clearMarkBtn">reset</button>' : '')
     +   '</div>'
-    +   '<div class="mark-sub">Drag over anything that is not the piece &mdash; the desk, your hand, a shadow.</div>'
+    +   '<div class="mark-sub">'+escapeHtml(CUT_MODES[_cutMode].hint)+'</div>'
     +   '<div class="mark-stage" id="markStage">'
     +     '<img src="'+imgSrc(item)+'" alt="">'
     +     '<canvas id="markCanvas"></canvas>'
+    +   '</div>'
+    +   '<div class="cut-tools">'
+    +     ['erase','restore'].map(function(m){
+            return '<button class="cut-tool'+(_cutMode===m?' on':'')+'" data-cut-mode="'+m+'">'
+                 + CUT_MODES[m].label + '</button>';
+          }).join('')
     +   '</div>'
     /* The other answer to a bad cut, for when marking it is not worth the
        trouble or the photograph simply cannot be read: leave this one alone.
@@ -5468,7 +5486,7 @@ function openDetail(id){
        only record, and there is nothing to replay it from. */
     const paintTo = function(p){
       if(!_cut || !_cut.at) return;
-      rubOut(_cut.mask.getContext('2d'), _cut.at, p);
+      paintStroke(_cut.mask.getContext('2d'), _cut.at, p, _cutMode);
       _cut.at = p;
       drawCutPreview(_cut);
     };
@@ -5495,7 +5513,7 @@ function openDetail(id){
          mask that arrived afterwards lands in the wrong place. */
       if(!_cut || _cut.id !== item.id) return;
       _cut.at = p;
-      rubOut(_cut.mask.getContext('2d'), p, p);
+      paintStroke(_cut.mask.getContext('2d'), p, p, _cutMode);
       drawCutPreview(_cut);
     };
     stage.onpointermove = function(e){
@@ -5516,6 +5534,18 @@ function openDetail(id){
        panel sitting empty. */
     enterCutting(item, stage, cutCv);
   }
+
+  /* Switching direction redraws the sheet, because the hint and which button is
+     lit both follow from it. The mask lives on _cut rather than in the DOM, so a
+     redraw costs nothing that was painted. */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cut-mode]'), function(b){
+    b.onclick = function(){
+      const m = b.getAttribute('data-cut-mode');
+      if(m === _cutMode) return;
+      _cutMode = m;
+      openDetail(id);
+    };
+  });
 
   const clearMark = document.getElementById('clearMarkBtn');
   if(clearMark) clearMark.onclick = function(){ startCutOver(item); };
@@ -5610,6 +5640,9 @@ function openDetail(id){
 function leaveDetail(){
   settleHandCut();
   _cut = null;
+  /* Back to rubbing out, because that is what opening a piece is nearly always
+     for -- bringing back is the correction to a correction. */
+  _cutMode = 'erase';
   detailOverlay.classList.remove('open');
 }
 detailOverlay.onclick = function(e){ if(e.target===detailOverlay) leaveDetail(); };
@@ -6136,24 +6169,35 @@ function bgMaskFromAlpha(cv, w, h){
   return (kept/(w*h) < 0.005) ? null : out;
 }
 
-/* One width, because there is one tool. Broad enough that sweeping a desk out of
-   the background is a couple of passes rather than a chore, and a fraction of the
-   square rather than pixels so it means the same thing on any photograph. */
+/* One width, because a width picker is a decision nobody wants to make about a
+   photograph of a shirt. Broad enough that sweeping a desk out of the background
+   is a couple of passes rather than a chore, and a fraction of the square rather
+   than pixels so it means the same thing on any photograph. */
 const CUT_BRUSH = 0.12;
+
+/* Which way the brush is pointing. Module-level rather than per-item, because it
+   is how you are working rather than anything true about the garment, and it has
+   to survive the sheet being redrawn. */
+let _cutMode = 'erase';
+const CUT_MODES = {
+  erase:   {label:'Rub out',    hint:'Drag over anything that is not the piece — the desk, your hand, a shadow.'},
+  restore: {label:'Bring back', hint:'Drag over any part of the piece the cut took away. It returns whatever the photo has there, shadow included.'}
+};
 
 /* The painting session, alive only while a sheet is open. */
 let _cut = null;
 
-/* Rub a segment of stroke out of the mask. destination-out means the colour is
-   irrelevant and only where it lands matters; round caps and joins are what make
-   a dragged sequence of these read as one continuous stroke.
+/* Paint a segment of stroke into the mask. Rubbing out is destination-out, where
+   the colour is irrelevant and only where it lands matters; bringing back paints
+   white, which is opaque, which is kept. Round caps and joins are what make a
+   dragged sequence of these read as one continuous stroke.
 
    Painted straight onto the mask rather than accumulated as a list of strokes to
-   replay. That was worth doing when there was an undo to stay consistent with;
-   with reset as the only way back, the mask is the record. */
-function rubOut(x, a, b){
+   replay. Replay existed to keep an undo consistent with what was on screen;
+   with no undo, the mask is the record. */
+function paintStroke(x, a, b, mode){
   const r = CUT_BRUSH * MASK_SIDE;
-  x.globalCompositeOperation = 'destination-out';
+  x.globalCompositeOperation = (mode === 'restore') ? 'source-over' : 'destination-out';
   x.strokeStyle = x.fillStyle = '#fff';
   x.lineWidth = r;
   x.lineCap = x.lineJoin = 'round';

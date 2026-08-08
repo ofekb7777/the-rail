@@ -464,17 +464,26 @@ That case used to be answered by an 18 MB segmentation model, downloadable from
 Settings. It has been taken out. What replaced it is your finger.
 
 Open a piece and the panel shows the cut the app worked out, against a
-chequerboard so you can see what has gone transparent. **Drag over anything that
-is not the piece** and it goes. **Reset** puts the app's own reading back. That
-is the entire interface.
+chequerboard so you can see what has gone transparent.
 
-It got there by subtraction. A tapped point, then a dragged box, then the model,
-then a box with two brushes and a width picker — each one another thing to learn
-before you could fix a picture. One gesture and one way back is what survived.
+| | |
+|---|---|
+| **Rub out** | drag over anything that is not the piece: the desk, your hand, a shadow |
+| **Bring back** | drag over any part of the piece the cut took away |
+| **Reset** | the app's own reading again |
 
-The cost is honest and worth stating: there is no way to paint something *back*.
-Rub out too much and the only remedy is reset and start again. That is the trade
-for a panel with two controls in it, and it is a deliberate one.
+No width picker and no undo. It got there by subtraction — a tapped point, then
+a dragged box, then the model, then a box with two brushes *and* a width picker,
+each one another thing to learn before you could fix a picture.
+
+Rubbing out on its own was tried and is a step too far: one careless sweep across
+a hem costs the whole mask, because reset is the only other way back, and a brush
+you are wary of using is worse than one more button. Bringing back is the
+correction to a correction, so the brush starts pointing at *rub out* every time
+a piece is opened.
+
+**Bring back is literal, not clever.** It returns whatever the photograph holds
+under the brush — drag it across a cast shadow and you get the shadow.
 
 A painted mask outranks the automatic reading, because it was only made when the
 automatic one was wrong.
@@ -494,8 +503,7 @@ essentially exact, and on about a third of hard photographs it either gives up o
 mangles it. Those are the ones worth a few strokes. A refusal deliberately seeds
 as *all of this is the piece*, so there is a background to rub away — seeding it
 empty would hand you a blank frame and ask you to trace a garment onto it, which
-is not something anybody finishes on a phone, and with no bring-back brush is not
-something you could do at all.
+is not something anybody finishes on a phone.
 
 **What it is worth to the colour reading — honestly, not much.** Over the same
 180 renders, comparing what the app says on its own against what it says off a
@@ -526,7 +534,7 @@ So the case for cutting by hand is not an accuracy table. It is that on the thir
 of photographs where the arithmetic fails, there is now an answer that cannot be
 wrong, because you are looking at it while you give it — and it costs nothing to
 carry. The app is 380 KB with no model in it, and the masks are
-6–10 KB per piece (8 KB measured on a shirt), stored as PNGs beside the photo.
+6–11 KB per piece (8 KB measured on a shirt), stored as PNGs beside the photo.
 
 **The 18 MB is removed automatically.** The model lived in a cache of its own,
 `the-rail-model-v1`, so that app updates would not throw it away. The service
