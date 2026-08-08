@@ -136,9 +136,8 @@ thing: the outer edge of the photo. Every rule below is one the code actually
 applies. Note that your photo is never altered — these rules decide how well the
 app can *read* it, not what gets stored.
 
-None of it is compulsory. If a photo comes out badly you can draw a box round
-the piece afterwards and the app will read it from inside that — see
-**Drawing a box round a piece** below.
+None of it is compulsory. If a photo comes out badly, open the piece and rub the
+background away with your finger — see [Cutting by hand](#cutting-by-hand) below.
 
 1. **Put the piece down on one plain surface.** The app samples the frame's
    border to find the backdrop, and gives up on separating the piece when that
@@ -228,11 +227,9 @@ and white on pale surfaces all read correctly now.
 The remainder is honest ambiguity *for a method that works on colours alone*: a
 white shirt on a white sheet under uneven light cannot be separated by measuring
 its edges, and a person looking only at those pixels would hesitate too.
-Photograph pale clothes on something darker — see the list above — or draw a box
-round the piece, which re-reads the colour from inside it.
-
-And when neither is enough, [cut it by hand](#cutting-by-hand) — the app shows you
-what it worked out and hands you two brushes to fix it.
+Photograph pale clothes on something darker — see the list above — or
+[cut it by hand](#cutting-by-hand): rub the background away with your finger, and
+the colour is re-read off whatever you kept.
 
 One thing worth knowing about how it fails. When the app *can* separate the
 piece, it gets the colour right; when it cannot, it used to judge the colour off
@@ -464,19 +461,23 @@ lit room** — a white shoe and a cream desk are the same colour with no edge
 between them.
 
 That case used to be answered by an 18 MB segmentation model, downloadable from
-Settings. It has been taken out. What replaced it is your finger: the app shows
-you the cut it worked out, against a chequerboard so you can see what has gone
-transparent, and hands you a box and two brushes.
+Settings. It has been taken out. What replaced it is your finger.
 
-| | |
-|---|---|
-| **Box** | drag a box round the piece — one gesture, and it re-reads the colour from inside it |
-| **Rub out** | drag over anything that is not the piece: the desk, your hand, a shadow |
-| **Bring back** | drag over any part of the piece the cut took away |
+Open a piece and the panel shows the cut the app worked out, against a
+chequerboard so you can see what has gone transparent. **Drag over anything that
+is not the piece** and it goes. **Reset** puts the app's own reading back. That
+is the entire interface.
 
-Fine or broad, undo, start over. A painted mask outranks a box, a box outranks
-the automatic reading, and in both cases for the same reason: the later answer
-was only given because the earlier one was wrong.
+It got there by subtraction. A tapped point, then a dragged box, then the model,
+then a box with two brushes and a width picker — each one another thing to learn
+before you could fix a picture. One gesture and one way back is what survived.
+
+The cost is honest and worth stating: there is no way to paint something *back*.
+Rub out too much and the only remedy is reset and start again. That is the trade
+for a panel with two controls in it, and it is a deliberate one.
+
+A painted mask outranks the automatic reading, because it was only made when the
+automatic one was wrong.
 
 **How often this is needed.** Measured over 180 renders — nine neutrals on four
 surfaces under five lighting conditions, the light falling on the whole scene:
@@ -493,7 +494,8 @@ essentially exact, and on about a third of hard photographs it either gives up o
 mangles it. Those are the ones worth a few strokes. A refusal deliberately seeds
 as *all of this is the piece*, so there is a background to rub away — seeding it
 empty would hand you a blank frame and ask you to trace a garment onto it, which
-is not something anybody finishes on a phone.
+is not something anybody finishes on a phone, and with no bring-back brush is not
+something you could do at all.
 
 **What it is worth to the colour reading — honestly, not much.** Over the same
 180 renders, comparing what the app says on its own against what it says off a
@@ -524,7 +526,7 @@ So the case for cutting by hand is not an accuracy table. It is that on the thir
 of photographs where the arithmetic fails, there is now an answer that cannot be
 wrong, because you are looking at it while you give it — and it costs nothing to
 carry. The app is 380 KB with no model in it, and the masks are
-6–10 KB per piece (9 KB measured on a shirt), stored as PNGs beside the photo.
+6–10 KB per piece (8 KB measured on a shirt), stored as PNGs beside the photo.
 
 **The 18 MB is removed automatically.** The model lived in a cache of its own,
 `the-rail-model-v1`, so that app updates would not throw it away. The service
@@ -555,45 +557,6 @@ the blunt instrument and answers "I do not want cut-outs"; this answers the far
 more common "that one came out wrong", which is a judgement about a single
 photograph and should not cost you the cut-outs that worked. Turning it back on
 is instant — the lifted copy is kept, not thrown away.
-
-### Drawing a box round a piece
-
-Some photographs cannot be read automatically and no amount of tuning will
-change that. A white trainer held over a cream desk is the clearest case: the
-shoe and the furniture are the same colour, they touch, and nothing in the frame
-says where one stops. Every attempt at guessing it produced the room.
-
-So open the piece and **drag a box round it**. Everything outside the box is
-dimmed as you drag. The box is not a hint the reader weighs against other
-evidence — it is a hard boundary:
-
-- the piece is described from the box's **middle third**, so a loose box does
-  not teach the reader that the bedspread either side is cloth;
-- the backdrop is described from the frame's rim **and** everything outside the
-  box, which is the part you have just ruled out;
-- the fill cannot cross the box, so **nothing outside it can survive** — which
-  is what makes it safe to relax the guards that would otherwise refuse the
-  photo outright.
-
-The tighter the box, the better the cut, with no reversals: a box drawn round
-the whole frame gives back exactly the automatic answer, and every box tighter
-than that is at least as good. Measured on two real photographs, a snug box was
-the first thing to cut the hem of a black shirt cleanly off a bedspread, and the
-first to get a shoe out of a room at all.
-
-Drawing a box also **re-reads the colour** from inside it. A wrong cut and a
-wrong colour are usually the same mistake — when the piece could not be told
-from the room, the colours were sampled off the room too. A colour you set by
-hand is left alone; only the app's own guess is replaced. The category is never
-touched, because it is confirmed by hand before an item can be saved, and
-quietly changing an answer you gave is worse than leaving a stale one.
-
-A **single tapped point was tried first and was worse than nothing**. It says
-which object you mean but nothing about where it ends, so on the trainer the
-fill grew out through the desk exactly as before, now with the app's confidence
-behind it. A box gives location and extent in the same one gesture. A tap that
-is not a drag — under 6% of the photo in either direction — is ignored rather
-than stored, so a mis-touch cannot throw away a good mark.
 
 The transparent copy is cached for the session and never written to storage: it
 is a way of *showing* the photo, not an edit to it.
