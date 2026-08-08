@@ -578,6 +578,34 @@
     position:absolute; border:2px solid #fff; box-shadow:0 0 0 9999px rgba(10,12,18,0.55);
     pointer-events:none; border-radius:2px;
   }
+  /* Painting shows the cut against a chequerboard rather than the photo. What
+     is being judged is what has gone transparent, and against white a white
+     shirt and a hole in the mask look exactly alike. The photo stays in the
+     flow underneath, only hidden, so switching tools does not move the page. */
+  .mark-stage.cutting{
+    background-color:#e8e1d4;
+    background-image:
+      linear-gradient(45deg, rgba(0,0,0,0.10) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.10) 75%),
+      linear-gradient(45deg, rgba(0,0,0,0.10) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.10) 75%);
+    background-size:16px 16px;
+    background-position:0 0, 8px 8px;
+  }
+  .mark-stage canvas{
+    position:absolute; inset:0; width:100%; height:100%;
+    display:none; pointer-events:none;
+  }
+  .mark-stage.cutting canvas{display:block;}
+  .mark-stage.cutting img{visibility:hidden;}
+  .mark-stage.cutting .mark-box{display:none;}
+  .cut-tools{display:flex; gap:6px; margin-top:8px;}
+  .cut-tool{
+    flex:1 1 0; min-width:0; background:rgba(255,255,255,0.05);
+    border:1px solid var(--line); border-radius:8px; color:rgba(239,232,216,0.72);
+    font-family:'Work Sans'; font-size:11.5px; font-weight:600; padding:7px 4px;
+    cursor:pointer; touch-action:manipulation; white-space:nowrap;
+  }
+  .cut-tool.on{background:var(--thread); border-color:var(--thread); color:#12141c;}
+  .cut-tool:disabled{opacity:0.35; cursor:default;}
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   @keyframes spin{to{transform:rotate(360deg);}}
   .sw-lg{width:26px;height:17px;border-radius:3px; display:block; border:1px solid rgba(0,0,0,0.25);}
@@ -919,6 +947,28 @@
     border-top:1px solid var(--line); padding-top:12px; margin-top:14px;
   }
 
+  /* Marks a feature that is on trial rather than settled, so it is obvious
+     which parts of this screen are being judged and which are the app. */
+  .test-tag{
+    font-size:9px; font-weight:800; letter-spacing:0.9px; color:var(--mustard);
+    border:1px solid var(--mustard); border-radius:3px; padding:1px 5px;
+    margin-left:8px; flex:none; opacity:0.85;
+  }
+  /* A look you own but have never worn: three photographs and a way in. */
+  .combo-list{display:flex; flex-direction:column; gap:8px; margin-top:4px;}
+  .combo-row{
+    display:flex; align-items:center; gap:8px; width:100%; padding:8px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--line);
+    border-radius:10px; cursor:pointer; font-family:'Work Sans';
+    transition:background var(--settle);
+  }
+  .combo-row:active{background:rgba(255,255,255,0.09);}
+  .combo-row img{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#fff;flex:none;}
+  .combo-go{
+    margin-left:auto; font-size:11px; font-weight:700; color:var(--mustard);
+    letter-spacing:0.3px; padding-right:4px;
+  }
+
   /* ================= BUILDER ================= */
   .bld-slots{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px;}
   .bld-slot{
@@ -1145,7 +1195,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.02';
+const APP_VERSION = '2026.09.04';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1614,6 +1664,11 @@ async function loadAll(){
       delete i.imageOriginal;
       migrated = true;
     }
+    /* There was briefly a segmentation model here, and it remembered its answer
+       on each piece it read. It has been taken out, so those answers go too --
+       a few kilobytes each of something nothing left in the app can produce or
+       check. A mask you painted by hand is a different thing and is kept. */
+    if(i.aiMask){ delete i.aiMask; migrated = true; }
   });
   if(migrated) saveItems();
 
@@ -2706,30 +2761,8 @@ async function processPhoto(file){
      freeing it. The lay-out does its own isolation at display time instead,
      where being wrong costs nothing but a plain-looking picture. */
   let cut = {applied:false};
-
-  /* The model first, if it is installed. Every colour this app still gets wrong
-     is a mask problem rather than a colour problem: a pale garment on a pale
-     surface, where the flood eats the garment and the reading is taken off
-     what is left. Measured across the 180 hardest renders -- nine neutrals on
-     four surfaces under five lighting conditions -- 168 read correctly with the
-     colour-based mask and 180 with the model's. Nothing that was right became
-     wrong.
-
-     Two of those twelve are black on a near-black surface under uneven light,
-     which is the failure issue #6 was opened for.
-
-     It costs two or three seconds a photograph, which is why it is only ever
-     the opt-in path. Without the model this returns null immediately and
-     everything below is exactly as it was. */
-  try{
-    const aiMask = await modelMask(drawToCanvas(img, 420));
-    if(aiMask) cut = {applied:true, mask:aiMask, shape:shapeFromMask(aiMask, work.width, work.height), viaModel:true};
-  }catch(e){ console.warn('the cut-out model failed', e); }
-
-  if(!cut.applied){
-    try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
-    catch(e){ console.warn('backdrop read failed', e); }
-  }
+  try{ cut = cutOutBackground(drawToCanvas(img, 420), {}); }
+  catch(e){ console.warn('backdrop read failed', e); }
 
   /* The edge told us nothing -- a bed, a desk, a hand in shot. Look from the
      middle out instead, which is where the thing you photographed is. */
@@ -4819,7 +4852,174 @@ function renderStats(){
       + ' you own '+(s.never.length===1?'has':'have')+' never been worn.</div>'
     : '';
 
-  return cards + mostWornBlock + deadBlock + idleNote + catBlock + colBlock;
+  return cards + mostWornBlock + deadBlock + idleNote + catBlock + colBlock
+       + renderCompatibility();
+}
+
+/* ============================================================
+   WHAT GOES WITH WHAT  —  on trial
+   Four readings of the same thing: how well the wardrobe connects to itself.
+
+   The Stats above are about what you have *worn*. That is a different question
+   from what *works*, and the app has been quietly conflating them: a piece can
+   gather dust because you do not feel like it, or because it goes with nothing
+   you own. Only the second is a wardrobe problem, and nothing here could tell
+   them apart.
+
+   All four come from one pass over goodBases(), which is the list of workable
+   top/bottom/shoe combinations and is cached, so this costs one traversal
+   rather than four.
+   ============================================================ */
+function compatibilityReport(){
+  const bases = goodBases();
+  const total = bases.length;
+
+  /* how many workable looks each piece appears in */
+  const inLooks = {};
+  state.items.forEach(function(i){ inLooks[i.id] = 0; });
+  bases.forEach(function(b){
+    b.forEach(function(i){ inLooks[i.id] = (inLooks[i.id]||0) + 1; });
+  });
+
+  /* Only the three categories a look is actually built from. An accessory
+     appears in no base by construction, and listing every belt as "goes with
+     nothing" would be an artefact of how looks are counted, not a fact about
+     the belt. */
+  const body = state.items.filter(function(i){
+    return ['top','bottom','footwear'].indexOf(i.category) > -1;
+  });
+
+  const ranked = body.map(function(i){
+      return {item:i, n:inLooks[i.id]||0, share: total ? (inLooks[i.id]||0)/total : 0};
+    }).sort(function(a,b){ return b.n - a.n; });
+
+  /* Which of those looks you have never actually worn. A wear counts if a
+     logged day held all three pieces -- it may have had a coat over it. */
+  const wornSigs = {};
+  state.wearLog.forEach(function(w){
+    const ids = w.itemIds || [];
+    for(let a=0;a<ids.length;a++) for(let b=a+1;b<ids.length;b++) for(let c=b+1;c<ids.length;c++){
+      wornSigs[[ids[a],ids[b],ids[c]].slice().sort().join('|')] = true;
+    }
+  });
+  const unworn = bases.filter(function(b){
+    return !wornSigs[b.map(function(i){ return i.id; }).sort().join('|')];
+  });
+
+  /* goodBases only ever looks at the first 22 pieces in each category, so that
+     counting stays instant on a large wardrobe. Past that the totals below are
+     a sample rather than the truth, and saying "156 looks" when the real number
+     is several thousand would be a confident wrong answer -- the thing this app
+     tries hardest not to give. So the caller is told, and says so. */
+  const CAP = 22;
+  const capped = ['top','bottom','footwear'].some(function(c){
+    return state.items.filter(function(i){ return i.category===c; }).length > CAP;
+  });
+
+  return {total:total, ranked:ranked, unworn:unworn, inLooks:inLooks, capped:capped};
+}
+
+/* A short, honest reason a piece connects to little. Cheap: it asks what one
+   more piece of each category and colour would do, using the machinery the
+   "what am I missing" panel already uses. */
+function bridgeFor(item){
+  const need = item.category === 'top' ? 'bottom' : 'top';
+  const base = goodBases().length;
+  let best = null;
+  ['black','charcoal','navy','grey','white','beige','denim','brown'].forEach(function(cn){
+    const virt = {id:'__virt', name:cn+' '+need, category:need, color:cn,
+                  warmth:3, formality:3, tags:[]};
+    const n = countGoodLooks(virt) - base;
+    if(n > 0 && (!best || n > best.n)) best = {n:n, color:cn, cat:need};
+  });
+  return best;
+}
+
+function renderCompatibility(){
+  const body = state.items.filter(function(i){
+    return ['top','bottom','footwear'].indexOf(i.category) > -1;
+  });
+  if(body.length < 3) return '';
+  const r = compatibilityReport();
+  if(!r.total){
+    return '<div class="sec-head"><div class="sec-title">What goes with what</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">No complete look works yet, so there is nothing to measure. '
+      + 'A top, a bottom and a pair of shoes that go together is the smallest thing this can count.</div>';
+  }
+
+  const pct = function(x){ return Math.round(x*100); };
+  const row = function(e, extra){
+    return '<div class="rank-row" data-id="'+e.item.id+'">'
+      + '<img src="'+imgSrc(e.item)+'" loading="lazy" alt="">'
+      + '<div class="rank-meta"><div class="rank-name">'+escapeHtml(e.item.name)+'</div>'
+      + '<div class="rank-sub">'+escapeHtml(extra||(pct(e.share)+'% of your looks'))+'</div></div>'
+      + '<div class="rank-val">'+e.n+'</div></div>';
+  };
+
+  /* 1. the pieces holding the wardrobe together */
+  const anchors = r.ranked.slice(0, 3);
+  const many = r.capped
+    ? 'Counted over a sample of your wardrobe rather than all of it — past about twenty pieces in a category the real number runs into the thousands, so treat these as a ranking rather than a tally. '
+    : '';
+  const anchorBlock = '<div class="sec-head"><div class="sec-title">What goes with what</div>'
+    + '<span class="test-tag">TEST</span></div>'
+    + '<div class="stat-note">' + many + 'Of ' + r.total + ' complete looks '
+    + (r.capped ? 'counted' : 'your wardrobe can make') + ', '
+    + 'these turn up in the most. Losing one of them costs you more than losing anything else.</div>'
+    + '<div class="rank-list">' + anchors.map(function(e){ return row(e); }).join('') + '</div>';
+
+  /* 2. the pieces that barely connect, and what would rescue them */
+  const orphans = r.ranked.filter(function(e){ return e.share < 0.15; }).slice(-3).reverse();
+  let orphanBlock = '';
+  if(orphans.length){
+    orphanBlock = '<div class="sec-head"><div class="sec-title">Barely connects</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="rank-list">' + orphans.map(function(e){
+          const b = e.n === 0 ? bridgeFor(e.item) : null;
+          const sub = e.n === 0
+            ? (b ? 'in nothing — a ' + b.color + ' ' + (b.cat==='bottom'?'bottom':'top') + ' would put it in ' + b.n
+                 : 'in nothing that works')
+            : pct(e.share) + '% of your looks';
+          return row(e, sub);
+        }).join('') + '</div>';
+  }
+
+  /* 3. looks it can already make that you have never put on */
+  let unwornBlock = '';
+  if(r.unworn.length){
+    const show = r.unworn.slice(0, 3);
+    unwornBlock = '<div class="sec-head"><div class="sec-title">Never worn together</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">' + r.unworn.length + ' of those ' + r.total
+      + ' you have never actually worn. Nothing to buy — you already own all of it.</div>'
+      + '<div class="combo-list">' + show.map(function(b){
+          return '<button class="combo-row" data-try="'+b.map(function(i){ return i.id; }).join(',')+'">'
+            + b.map(function(i){ return '<img src="'+imgSrc(i)+'" loading="lazy" alt="">'; }).join('')
+            + '<span class="combo-go">try it →</span></button>';
+        }).join('') + '</div>';
+  }
+
+  /* 4. the other end of the same list */
+  const dead = r.ranked.filter(function(e){
+    if(e.n > 0) return false;
+    const worn = state.wearLog.some(function(w){ return (w.itemIds||[]).indexOf(e.item.id) > -1; });
+    return !worn;
+  });
+  let deadBlock2 = '';
+  if(dead.length){
+    deadBlock2 = '<div class="sec-head"><div class="sec-title">Worth reconsidering</div>'
+      + '<span class="test-tag">TEST</span></div>'
+      + '<div class="stat-note">In no working look, and never worn. That is not a verdict on the '
+      + 'piece — it may just need one thing to sit against, which is what the line under each says.</div>'
+      + '<div class="rank-list">' + dead.slice(0,3).map(function(e){
+          const b = bridgeFor(e.item);
+          return row(e, b ? 'a ' + b.color + ' ' + (b.cat==='bottom'?'bottom':'top') + ' would put it in ' + b.n + ' looks'
+                          : 'nothing obvious would rescue it');
+        }).join('') + '</div>';
+  }
+
+  return anchorBlock + orphanBlock + unwornBlock + deadBlock2;
 }
 
 function rankRow(r, val, cls, sub){
@@ -5243,19 +5443,41 @@ function openDetail(id){
        one gesture, and measured on the same photographs the tighter the box
        the better the cut -- with a box round the whole frame coming out
        exactly as the automatic reading does. */
+    /* And when even a box is not enough, the brushes finish it by hand. The two
+       are one panel rather than two because they are the same job at different
+       resolutions: the box says roughly where the piece is in one gesture, the
+       brushes settle the pixels the arithmetic still got wrong. */
     + '<div class="mark-panel">'
     +   '<div class="mark-head">'
-    +     '<span class="mark-title">' + (item.cutMark ? 'Marked' : 'Cut-out not right?') + '</span>'
-    +     (item.cutMark ? '<button class="mark-clear" id="clearMarkBtn">clear</button>' : '')
+    +     '<span class="mark-title">'
+    +       (item.handMask ? 'Cut by hand' : item.cutMark ? 'Marked' : 'Cut-out not right?')
+    +     '</span>'
+    +     ((item.cutMark || item.handMask)
+        ? '<button class="mark-clear" id="clearMarkBtn">start over</button>' : '')
     +   '</div>'
-    +   '<div class="mark-sub">Drag a box round the piece in the photo below. Keep it close to the edges &mdash; the tighter it is, the better the cut.</div>'
+    +   '<div class="mark-sub" id="markHint">'+escapeHtml(CUT_TOOLS[_cutTool].hint)+'</div>'
     +   '<div class="mark-stage" id="markStage">'
     +     '<img src="'+imgSrc(item)+'" alt="">'
+    +     '<canvas id="markCanvas"></canvas>'
     +     (item.cutMark
         ? '<span class="mark-box" id="markBox" style="left:'+(item.cutMark.x0*100)+'%;top:'+(item.cutMark.y0*100)+'%'
           + ';width:'+((item.cutMark.x1-item.cutMark.x0)*100)+'%;height:'+((item.cutMark.y1-item.cutMark.y0)*100)+'%"></span>'
         : '<span class="mark-box" id="markBox" style="display:none"></span>')
     +   '</div>'
+    +   '<div class="cut-tools">'
+    +     ['box','erase','restore'].map(function(t){
+            return '<button class="cut-tool'+(_cutTool===t?' on':'')+'" data-cut-tool="'+t+'">'
+                 + CUT_TOOLS[t].label + '</button>';
+          }).join('')
+    +   '</div>'
+    /* The second row only means anything with a brush in hand, so it is only
+       there then -- a disabled row of buttons is noise on a screen this size. */
+    +   (_cutTool === 'box' ? '' :
+          '<div class="cut-tools">'
+        +   '<button class="cut-tool'+(_cutSize===CUT_SIZES.fine?' on':'')+'" data-cut-size="fine">Fine</button>'
+        +   '<button class="cut-tool'+(_cutSize===CUT_SIZES.broad?' on':'')+'" data-cut-size="broad">Broad</button>'
+        +   '<button class="cut-tool" id="cutUndoBtn">Undo</button>'
+        + '</div>')
     /* The other answer to a bad cut, for when marking it is not worth the
        trouble or the photograph simply cannot be read: leave this one alone.
        Beside the box rather than in Settings, because both are answers to the
@@ -5298,14 +5520,14 @@ function openDetail(id){
     await saveItems();
     openDetail(id);
   };
-  /* One drag is the whole interaction. Pointer events rather than mouse or
-     touch ones: the same three handlers then cover finger, stylus and mouse,
-     and capture means a drag that runs off the photo still finishes here
-     instead of being lost to whatever it passed over. */
+  /* One drag is the whole interaction, whichever tool is in hand. Pointer
+     events rather than mouse or touch ones: the same handlers then cover
+     finger, stylus and mouse, and capture means a drag that runs off the photo
+     still finishes here instead of being lost to whatever it passed over. */
   const stage = document.getElementById('markStage');
   const boxEl = document.getElementById('markBox');
+  const cutCv = document.getElementById('markCanvas');
   if(stage && boxEl){
-    let from = null;
     /* Null rather than a fraction of nothing. The stage has no height until
        the photo has loaded into it, and dividing by that height gives NaN --
        which sails through a "is this box big enough" test, gets stored, and
@@ -5318,6 +5540,9 @@ function openDetail(id){
         y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
       };
     };
+
+    /* ---- the box ---- */
+    let from = null;
     const show = function(a, b){
       boxEl.style.display = '';
       boxEl.style.left   = (Math.min(a.x,b.x)*100) + '%';
@@ -5325,21 +5550,7 @@ function openDetail(id){
       boxEl.style.width  = (Math.abs(b.x-a.x)*100) + '%';
       boxEl.style.height = (Math.abs(b.y-a.y)*100) + '%';
     };
-    stage.onpointerdown = function(e){
-      from = at(e);
-      if(!from) return;
-      /* Capture can be refused -- a pointer the browser no longer considers
-         active -- and losing the drag is a better outcome than losing the
-         handler to an exception. */
-      try{ stage.setPointerCapture(e.pointerId); }catch(err){}
-      show(from, from);
-      e.preventDefault();
-    };
-    stage.onpointermove = function(e){
-      const p = from && at(e);
-      if(p) show(from, p);
-    };
-    stage.onpointerup = async function(e){
+    const boxUp = async function(e){
       const a = from, b = at(e);
       from = null;
       if(!a || !b) return;
@@ -5355,6 +5566,10 @@ function openDetail(id){
         return;
       }
       item.cutMark = box;
+      /* A box is a coarser answer than a painted mask, so it does not get to
+         quietly undo one. Whoever wants to start again has the button for it. */
+      delete item.handMask;
+      _cut = null;
       _layCache.delete(item.id);
       /* Only when the colour is still the app's own guess. A colour you set by
          hand is an answer, and drawing a box is not a request to overrule it. */
@@ -5375,16 +5590,121 @@ function openDetail(id){
       toast(recoloured ? 'Reading it from inside the box — ' + recoloured
                        : 'Reading the piece from inside the box');
     };
-    stage.onpointercancel = function(){ from = null; openDetail(id); };
+
+    /* ---- the brushes ---- */
+    const paintTo = function(p){
+      if(!_cut || !_cut.live) return;
+      _cut.live.pts.push(p);
+      /* Replayed from the seed on every move rather than the last segment being
+         added on top. Slower, and it guarantees that what you are looking at is
+         exactly what undo will reproduce -- with destination-out, overlapping
+         segments erode an antialiased edge a second time, so the incremental
+         picture and the replayed one would slowly drift apart. */
+      replayStrokes(_cut);
+      drawCutPreview(_cut);
+    };
+    const paintUp = function(){
+      if(!_cut || !_cut.live) return;
+      _cut.live = null;
+      /* Written to the piece now rather than on the settle, so the stored mask
+         is never behind what is on screen even if something interrupts. */
+      item.handMask = alphaMaskToPng(_cut.mask);
+      _layCache.delete(item.id);
+      scheduleCutSettle(item);
+      const undo = document.getElementById('cutUndoBtn');
+      if(undo) undo.disabled = false;
+    };
+
+    stage.onpointerdown = function(e){
+      const p = at(e);
+      if(!p) return;
+      /* Capture can be refused -- a pointer the browser no longer considers
+         active -- and losing the drag is a better outcome than losing the
+         handler to an exception. */
+      try{ stage.setPointerCapture(e.pointerId); }catch(err){}
+      e.preventDefault();
+      if(_cutTool === 'box'){
+        from = p;
+        show(p, p);
+        return;
+      }
+      /* A brush before the session is ready. Ignored rather than queued: the
+         seed takes a moment on a large photograph, and a stroke replayed onto
+         a mask that arrived afterwards lands in the wrong place. */
+      if(!_cut || _cut.id !== item.id) return;
+      _cut.live = {tool:_cutTool, size:_cutSize, pts:[p]};
+      _cut.strokes.push(_cut.live);
+      replayStrokes(_cut);
+      drawCutPreview(_cut);
+    };
+    stage.onpointermove = function(e){
+      if(_cutTool === 'box'){
+        const p = from && at(e);
+        if(p) show(from, p);
+        return;
+      }
+      if(!_cut || !_cut.live) return;
+      const p = at(e);
+      if(p) paintTo(p);
+    };
+    stage.onpointerup = function(e){
+      if(_cutTool === 'box') return boxUp(e);
+      const p = at(e);
+      if(p) paintTo(p);
+      paintUp();
+    };
+    stage.onpointercancel = function(){
+      if(_cutTool === 'box'){ from = null; openDetail(id); return; }
+      paintUp();
+    };
   }
+
+  /* Switching tool redraws the sheet, because the hint, the width row and what
+     the stage is showing all follow from it. The strokes live on _cut rather
+     than in the DOM, so redrawing does not cost you any of them. */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cut-tool]'), function(b){
+    b.onclick = function(){
+      const t = b.getAttribute('data-cut-tool');
+      if(t === _cutTool) return;
+      _cutTool = t;
+      openDetail(id);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cut-size]'), function(b){
+    b.onclick = function(){
+      _cutSize = CUT_SIZES[b.getAttribute('data-cut-size')];
+      openDetail(id);
+    };
+  });
+
+  const undoBtn = document.getElementById('cutUndoBtn');
+  if(undoBtn){
+    undoBtn.disabled = !(_cut && _cut.id === item.id && _cut.strokes.length);
+    undoBtn.onclick = function(){
+      if(!_cut || _cut.id !== item.id || !_cut.strokes.length) return;
+      _cut.strokes.pop();
+      replayStrokes(_cut);
+      drawCutPreview(_cut);
+      /* No strokes left means the mask is the app's own answer again, and
+         storing a copy of that would only be one more thing to keep in step. */
+      if(_cut.strokes.length) item.handMask = alphaMaskToPng(_cut.mask);
+      else delete item.handMask;
+      _layCache.delete(item.id);
+      scheduleCutSettle(item);
+      undoBtn.disabled = !_cut.strokes.length;
+    };
+  }
+
+  /* Cutting mode is entered after the sheet exists, because it needs the canvas
+     that the sheet just built. Nothing is awaited by the caller: the photo is
+     already on screen underneath, so the preview arriving a frame later reads
+     as it appearing rather than as the panel being empty. */
+  if(_cutTool !== 'box' && stage && cutCv){
+    enterCutting(item, stage, cutCv);
+  }
+
   const clearMark = document.getElementById('clearMarkBtn');
-  if(clearMark) clearMark.onclick = async function(){
-    delete item.cutMark;
-    _layCache.delete(item.id);
-    await saveItems();
-    openDetail(id);
-    render();
-  };
+  if(clearMark) clearMark.onclick = function(){ startCutOver(item); };
   const asPhoto = document.getElementById('showAsPhotoBtn');
   if(asPhoto) asPhoto.onclick = async function(){
     /* Deleted rather than set to false, so an item carries the flag only when
@@ -5466,9 +5786,28 @@ function openDetail(id){
     render();
     toast('Removed');
   };
-  document.getElementById('closeDetailBtn').onclick = function(){ detailOverlay.classList.remove('open'); };
+  document.getElementById('closeDetailBtn').onclick = function(){ leaveDetail(); };
 }
-detailOverlay.onclick = function(e){ if(e.target===detailOverlay) detailOverlay.classList.remove('open'); };
+
+/* Leaving the item sheet. The last stroke is written out now rather than left to
+   its timer, the session's canvases are dropped, and the tool goes back to the
+   box so that opening the next piece shows the photograph rather than silently
+   starting to work out a mask for it. */
+function leaveDetail(){
+  settleHandCut();
+  _cut = null;
+  _cutTool = 'box';
+  detailOverlay.classList.remove('open');
+}
+detailOverlay.onclick = function(e){ if(e.target===detailOverlay) leaveDetail(); };
+
+/* The timer is short, but a phone being swiped away mid-stroke should not cost
+   the stroke. Best effort -- the write is asynchronous and the page may go
+   first -- which is still better than not trying. */
+window.addEventListener('pagehide', function(){ settleHandCut(); });
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'hidden') settleHandCut();
+});
 
 /* ---------- anchor picker ---------- */
 function openAnchorPicker(){
@@ -5612,165 +5951,18 @@ function renderBatchQueue(){
 const _layCache = new Map();
 
 /* ============================================================
-   THE SMART CUT-OUT
-   A segmentation model, off by default and downloaded only if you ask for it.
-
-   Everything above this line is arithmetic on colours: measure the border,
-   decide what is backdrop, flood inward. That works on a garment put down on
-   something plain and cannot be made to work on a white trainer held up in a
-   lit room, because a white shoe and a cream desk are the same colour with no
-   edge between them. Measured on exactly that photograph, the flood fill
-   refuses outright while the model cuts the shoe and takes the hand holding it
-   off as well.
-
-   So it earns its place -- but it is 18 MB, against an app of about 330 KB, and
-   that is a real cost to hand someone who never asked for it. Hence: nothing
-   here is fetched until the button in Settings is pressed, and the app is
-   built to be complete without it.
-
-   The files sit in ai/ and are served from this origin like everything else.
-   The service worker keeps them in a cache of their own so that publishing a
-   new version of the app does not throw them away.
+   MASKS
+   A mask is the answer to "which pixels are the piece". The arithmetic above
+   works one out from the photograph; the item sheet lets you draw one by hand
+   when the arithmetic gets it wrong. These three turn a mask into the shape
+   the category guess wants, into something small enough to keep, and back
+   onto a photograph.
    ============================================================ */
-const MODEL_FILES = [
-  './ai/ort.wasm.bundle.min.mjs',
-  './ai/ort-wasm-simd-threaded.mjs',
-  './ai/ort-wasm-simd-threaded.wasm',
-  './ai/u2netp.onnx'
-];
-const MODEL_CACHE = 'the-rail-model-v1';
-const MODEL_BYTES = 18200000;          /* what to warn about, roughly */
-const MODEL_SIDE  = 320;               /* what u2netp expects */
-
-let _ortSession = null;                /* the loaded model, once per page */
-let _ortLoading = null;
-
-/* Is it already downloaded? Asked of the cache rather than remembered in a
-   setting, so it cannot claim to be there when the browser has evicted it. */
-async function modelInstalled(){
-  try{
-    if(!self.caches) return false;
-    const c = await caches.open(MODEL_CACHE);
-    for(let i=0;i<MODEL_FILES.length;i++){
-      if(!(await c.match(MODEL_FILES[i]))) return false;
-    }
-    return true;
-  }catch(e){ return false; }
-}
-
-/* Download it. onProgress is called with a fraction so the button can show
-   something -- 18 MB over a phone connection is long enough that a silent
-   button looks broken. */
-async function installModel(onProgress){
-  if(!self.caches) throw new Error('This browser has no cache storage to keep it in.');
-  const c = await caches.open(MODEL_CACHE);
-  let done = 0;
-  for(let i=0;i<MODEL_FILES.length;i++){
-    const url = MODEL_FILES[i];
-    if(!(await c.match(url))){
-      const res = await fetch(url, {cache:'reload'});
-      if(!res.ok) throw new Error('Could not fetch ' + url + ' (' + res.status + ')');
-      await c.put(url, res.clone());
-    }
-    done++;
-    if(onProgress) onProgress(done/MODEL_FILES.length);
-  }
-  return true;
-}
-
-async function removeModel(){
-  _ortSession = null; _ortLoading = null;
-  try{ await caches.delete(MODEL_CACHE); }catch(e){}
-  /* Masks already worked out came from the model, so they go too -- otherwise
-     turning it off would leave its results behind and look like it had not. */
-  state.items.forEach(function(i){ delete i.aiMask; });
-  _layCache.clear();
-  await saveItems();
-}
-
-/* Load the model into memory. Returns null rather than throwing when it is not
-   installed, because "not installed" is the ordinary case, not a fault. */
-async function ensureModel(){
-  if(_ortSession) return _ortSession;
-  if(_ortLoading) return _ortLoading;
-  if(!(await modelInstalled())) return null;
-  _ortLoading = (async function(){
-    try{
-      const ort = await import('./ai/ort.wasm.bundle.min.mjs');
-      /* An absolute URL, not './ai/'. The runtime resolves this against its own
-         module URL rather than the document's, so a relative path here asked
-         for /ai/ai/ and 404'd. */
-      ort.env.wasm.wasmPaths = new URL('./ai/', location.href).href;
-      /* One thread. Threads need cross-origin isolation, which needs headers a
-         static host will not send, and a wardrobe is a handful of photographs
-         rather than a video stream. */
-      ort.env.wasm.numThreads = 1;
-      _ortSession = await ort.InferenceSession.create('./ai/u2netp.onnx', {executionProviders:['wasm']});
-      _ortSession.__ort = ort;
-      return _ortSession;
-    }catch(e){
-      console.warn('the cut-out model would not load', e);
-      _ortLoading = null;
-      return null;
-    }
-  })();
-  return _ortLoading;
-}
-
-/* Run it over one canvas. Gives back a Uint8Array the same shape as the
-   canvas, marking *background* -- the same convention every other mask in this
-   file uses, so it drops straight into the existing code. Null if the model is
-   not there. */
-async function modelMask(canvas){
-  const sess = await ensureModel();
-  if(!sess) return null;
-  const ort = sess.__ort;
-  const S = MODEL_SIDE;
-  const small = document.createElement('canvas');
-  small.width = S; small.height = S;
-  small.getContext('2d').drawImage(canvas, 0, 0, S, S);
-  const d = small.getContext('2d', {willReadFrequently:true}).getImageData(0,0,S,S).data;
-
-  /* The normalisation u2net was trained with, including the divide by the
-     image's own maximum. That last step is not decoration: on a dark
-     photograph it is the difference between a silhouette and a grey smear. */
-  const MEAN = [0.485,0.456,0.406], STD = [0.229,0.224,0.225];
-  let mx = 0;
-  for(let i=0;i<d.length;i+=4){ if(d[i]>mx)mx=d[i]; if(d[i+1]>mx)mx=d[i+1]; if(d[i+2]>mx)mx=d[i+2]; }
-  mx = mx || 255;
-  const f = new Float32Array(3*S*S);
-  for(let p=0;p<S*S;p++){
-    for(let ch=0;ch<3;ch++) f[ch*S*S+p] = ((d[p*4+ch]/mx) - MEAN[ch]) / STD[ch];
-  }
-
-  let out;
-  try{
-    out = await sess.run({[sess.inputNames[0]]: new ort.Tensor('float32', f, [1,3,S,S])});
-  }catch(e){
-    console.warn('the cut-out model failed on this photo', e);
-    return null;
-  }
-  const raw = out[sess.outputNames[0]].data;    /* d0, the fused output */
-  let lo = Infinity, hi = -Infinity;
-  for(let i=0;i<raw.length;i++){ if(raw[i]<lo)lo=raw[i]; if(raw[i]>hi)hi=raw[i]; }
-  const span = (hi-lo) || 1;
-
-  const w = canvas.width, h = canvas.height;
-  const mask = new Uint8Array(w*h);
-  let kept = 0;
-  for(let y=0;y<h;y++){
-    const sy = Math.min(S-1, (y/h*S)|0);
-    for(let x=0;x<w;x++){
-      const sx = Math.min(S-1, (x/w*S)|0);
-      const v = (raw[sy*S+sx]-lo)/span;
-      if(v > 0.5) kept++; else mask[y*w+x] = 1;
-    }
-  }
-  /* It found nothing worth keeping. Better to say so and let the older reading
-     have its turn than to hand back an empty cut-out. */
-  if(kept/(w*h) < 0.005) return null;
-  return mask;
-}
+/* Masks are stored at a 320 square regardless of the photo's size. A
+   silhouette is one big shape with a soft edge -- there is nothing in it that
+   needs more resolution than that, and scaling one back up smooths its border,
+   which is what you want anyway. */
+const MASK_SIDE = 320;
 
 /* The silhouette, described the way the category guess wants it: how tall
    against how wide, how much of the frame, where it sits, and how much of its
@@ -5813,7 +6005,7 @@ function shapeFromMask(mask, w, h){
    is worth keeping at all because the model takes a couple of seconds, which is
    fine once and irritating on every visit to the tab. */
 function maskToPng(mask, w, h){
-  const S = MODEL_SIDE;
+  const S = MASK_SIDE;
   const c = document.createElement('canvas');
   c.width = S; c.height = S;
   const ctx = c.getContext('2d');
@@ -6054,6 +6246,331 @@ function liftForLayout(canvas, mark){
   return true;
 }
 
+/* ============================================================
+   CUTTING BY HAND
+   Everything above measures colours, and no amount of measuring finds an edge
+   that is not in the photograph. A white trainer on a cream desk is one colour
+   with nothing between the two, and that case is not a tuning problem.
+
+   There was briefly a segmentation model here for exactly it. The model worked;
+   it also cost 18 MB against an app of 380 KB, which is a great deal of weight
+   to hand someone for the last few per cent of a cut-out. So the last word is
+   yours instead: the app makes its guess, shows you what it did, and gives you
+   two brushes -- rub out what should not be there, bring back what it took.
+
+   On the one axis that matters here that is strictly better than any model,
+   because you are looking at the answer while you give it.
+
+   While the sheet is open a mask is a canvas whose *alpha* is the answer:
+   opaque means keep this pixel. That is the form the compositor wants, so a
+   stroke is one drawImage rather than a loop over pixels, and it converts to
+   the stored black-and-white PNG in one more.
+   ============================================================ */
+
+/* The stored form -- white is the piece -- so applyMaskPng puts it back like
+   any other mask in this file. Drawn over black rather than onto nothing, which
+   is what makes a half-painted brush edge land as grey and come back as
+   half-transparent instead of as a staircase. */
+function alphaMaskToPng(cv){
+  const c = document.createElement('canvas');
+  c.width = c.height = MASK_SIDE;
+  const x = c.getContext('2d');
+  x.fillStyle = '#000';
+  x.fillRect(0, 0, MASK_SIDE, MASK_SIDE);
+  x.drawImage(cv, 0, 0, MASK_SIDE, MASK_SIDE);
+  return c.toDataURL('image/png');
+}
+
+/* And back again, once when the sheet opens. */
+async function pngToAlphaMask(dataUrl){
+  const img = await loadImageFromDataUrl(dataUrl);
+  const c = document.createElement('canvas');
+  c.width = c.height = MASK_SIDE;
+  const x = c.getContext('2d', {willReadFrequently:true});
+  x.drawImage(img, 0, 0, MASK_SIDE, MASK_SIDE);
+  const im = x.getImageData(0, 0, MASK_SIDE, MASK_SIDE);
+  for(let i = 0; i < MASK_SIDE*MASK_SIDE; i++){
+    const v = im.data[i*4];
+    im.data[i*4] = im.data[i*4+1] = im.data[i*4+2] = 255;
+    im.data[i*4+3] = v;
+  }
+  x.putImageData(im, 0, 0);
+  return c;
+}
+
+/* Where the brushes start from: whatever the app worked out on its own, box
+   and all. That is the "with some help" part -- on most photographs there are
+   a few strokes of tidying to do rather than a garment to trace.
+
+   A photograph the arithmetic refused outright seeds as "all of it is the
+   piece", so you rub the background away. That is deliberately not the other
+   way round: rubbing out a desk is a few sweeps, and painting in a whole shoe
+   is not something anyone would finish. */
+async function handCutSeed(item){
+  const img = await loadImageFromDataUrl(item.image);
+  const c = drawToCanvas(img, 420);
+  let lifted = false;
+  try{ lifted = !!liftForLayout(c, item.cutMark); }
+  catch(e){ console.warn('the automatic cut failed; starting from the whole frame', e); }
+
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = MASK_SIDE;
+  const x = cv.getContext('2d');
+  if(!lifted){
+    x.fillStyle = '#fff';
+    x.fillRect(0, 0, MASK_SIDE, MASK_SIDE);
+    return cv;
+  }
+  /* The cut is sitting in the photo's alpha. Squeezed into the square exactly
+     the way maskToPng does it, so a mask made here and a mask made there mean
+     the same thing at the same coordinates. */
+  const src = c.getContext('2d', {willReadFrequently:true})
+               .getImageData(0, 0, c.width, c.height).data;
+  const im = x.createImageData(MASK_SIDE, MASK_SIDE);
+  for(let y = 0; y < MASK_SIDE; y++){
+    const sy = Math.min(c.height-1, (y/MASK_SIDE*c.height)|0);
+    for(let px = 0; px < MASK_SIDE; px++){
+      const sx = Math.min(c.width-1, (px/MASK_SIDE*c.width)|0);
+      const p = (y*MASK_SIDE+px)*4;
+      im.data[p] = im.data[p+1] = im.data[p+2] = 255;
+      im.data[p+3] = src[(sy*c.width+sx)*4+3];
+    }
+  }
+  x.putImageData(im, 0, 0);
+  return cv;
+}
+
+/* The colour reader wants the opposite convention: a byte per pixel, truthy for
+   *background*, at the photograph's own size. Null when there is too little left
+   to read a colour from, which is the same bar the automatic masks answer to. */
+function bgMaskFromAlpha(cv, w, h){
+  const a = cv.getContext('2d', {willReadFrequently:true})
+              .getImageData(0, 0, MASK_SIDE, MASK_SIDE).data;
+  const out = new Uint8Array(w*h);
+  let kept = 0;
+  for(let y = 0; y < h; y++){
+    const sy = Math.min(MASK_SIDE-1, (y/h*MASK_SIDE)|0);
+    for(let px = 0; px < w; px++){
+      const sx = Math.min(MASK_SIDE-1, (px/w*MASK_SIDE)|0);
+      const on = a[(sy*MASK_SIDE+sx)*4+3] >= 128;
+      out[y*w+px] = on ? 0 : 1;
+      if(on) kept++;
+    }
+  }
+  return (kept/(w*h) < 0.005) ? null : out;
+}
+
+/* Which tool the stage is in. Module-level rather than per-item, because it is
+   how you are working rather than anything true about the garment, and because
+   it has to survive the sheet being redrawn. */
+let _cutTool = 'box';
+/* Stroke width as a fraction of the square. Broad by default: the common job is
+   sweeping a desk out of the background, and a fine brush makes that tedious. */
+const CUT_SIZES = {fine:0.035, broad:0.14};
+let _cutSize = CUT_SIZES.broad;
+
+const CUT_TOOLS = {
+  box:     {label:'Box',        hint:'Drag a box round the piece. The tighter it is, the better the cut.'},
+  erase:   {label:'Rub out',    hint:'Drag over anything that is not the piece — the desk, your hand, a shadow.'},
+  restore: {label:'Bring back', hint:'Drag over any part of the piece that went missing.'}
+};
+
+/* The brush session, alive only while a sheet is open. Strokes are kept as
+   strokes rather than as pictures of the mask, which is what makes undo a pop
+   and a replay instead of a stack of 400 KB snapshots. */
+let _cut = null;
+
+function strokeOnto(x, s){
+  const r = s.size * MASK_SIDE;
+  /* Rubbing out is destination-out: the stroke's own colour is irrelevant, only
+     where it lands. Bringing back paints white, which is opaque, which is kept. */
+  x.globalCompositeOperation = (s.tool === 'erase') ? 'destination-out' : 'source-over';
+  x.strokeStyle = x.fillStyle = '#fff';
+  x.lineWidth = r;
+  x.lineCap = x.lineJoin = 'round';
+  if(s.pts.length < 2){
+    x.beginPath();
+    x.arc(s.pts[0].x*MASK_SIDE, s.pts[0].y*MASK_SIDE, r/2, 0, Math.PI*2);
+    x.fill();
+  }else{
+    x.beginPath();
+    x.moveTo(s.pts[0].x*MASK_SIDE, s.pts[0].y*MASK_SIDE);
+    for(let i = 1; i < s.pts.length; i++) x.lineTo(s.pts[i].x*MASK_SIDE, s.pts[i].y*MASK_SIDE);
+    x.stroke();
+  }
+  x.globalCompositeOperation = 'source-over';
+}
+
+function replayStrokes(c){
+  const x = c.mask.getContext('2d');
+  x.globalCompositeOperation = 'source-over';
+  x.clearRect(0, 0, MASK_SIDE, MASK_SIDE);
+  x.drawImage(c.seed, 0, 0);
+  c.strokes.forEach(function(s){ strokeOnto(x, s); });
+}
+
+/* The photograph wearing the mask's alpha, entirely through the compositor --
+   this runs on every pointer move, so it must never touch pixels one at a
+   time. */
+function drawCutPreview(c){
+  const x = c.view.getContext('2d');
+  x.globalCompositeOperation = 'source-over';
+  x.clearRect(0, 0, c.view.width, c.view.height);
+  x.drawImage(c.photo, 0, 0);
+  x.globalCompositeOperation = 'destination-in';
+  x.drawImage(c.mask, 0, 0, c.view.width, c.view.height);
+  x.globalCompositeOperation = 'source-over';
+}
+
+/* Opens a brush session on a piece, or picks the open one back up. The sheet is
+   rebuilt whenever a tool or a width changes, so this runs often and must not
+   throw away strokes when it does -- hence the check on the id rather than a
+   fresh session every time. */
+async function enterCutting(item, stage, cv){
+  if(_cut && _cut.id === item.id){
+    /* The canvas element is new after every redraw, so the session is pointed
+       at the current one rather than the one it was built with. */
+    _cut.view = cv;
+    cv.width = _cut.photo.width;
+    cv.height = _cut.photo.height;
+    stage.classList.add('cutting');
+    drawCutPreview(_cut);
+    return _cut;
+  }
+  try{
+    const img = await loadImageFromDataUrl(item.image);
+    const photo = drawToCanvas(img, 420);
+    /* A mask already painted becomes the seed, so a session begun later starts
+       from where the last one finished rather than from the app's guess. The
+       cost is that undo does not reach back past the sheet being closed, which
+       is the ordinary meaning of undo. */
+    const seed = item.handMask ? await pngToAlphaMask(item.handMask)
+                               : await handCutSeed(item);
+    const mask = document.createElement('canvas');
+    mask.width = mask.height = MASK_SIDE;
+    _cut = {id:item.id, view:cv, photo:photo, seed:seed, mask:mask, strokes:[], live:null};
+    cv.width = photo.width;
+    cv.height = photo.height;
+    replayStrokes(_cut);
+    /* Only once there is something to show. Adding the class earlier hides the
+       photograph and leaves a chequerboard sitting there while this runs. */
+    stage.classList.add('cutting');
+    drawCutPreview(_cut);
+    return _cut;
+  }catch(e){
+    console.warn('could not open the photo for painting', e);
+    _cut = null;
+    /* Left in box mode with the photograph showing rather than in a painting
+       mode that cannot paint. */
+    stage.classList.remove('cutting');
+    toast('That photo could not be opened for painting');
+    return null;
+  }
+}
+
+/* Saving after every stroke would rewrite the whole wardrobe, photographs
+   included, several times a second, and re-reading the colour every time would
+   be worse. Wait for the hand to stop instead. */
+let _cutSettleTimer = null;
+let _cutPending = null;
+
+function scheduleCutSettle(item){
+  _cutPending = item;
+  if(_cutSettleTimer) clearTimeout(_cutSettleTimer);
+  _cutSettleTimer = setTimeout(function(){ settleHandCut(); }, 450);
+}
+
+/* Called when the sheet closes as well as on the timer, so leaving a moment
+   after the last stroke does not lose it. */
+async function settleHandCut(){
+  if(_cutSettleTimer){ clearTimeout(_cutSettleTimer); _cutSettleTimer = null; }
+  const item = _cutPending;
+  _cutPending = null;
+  if(!item) return;
+  /* A wrong cut and a wrong colour are usually the same mistake, and a mask you
+     painted is the most reliable one the app will ever have -- so the colour is
+     worth re-reading off it. Only while the colour is still the app's own guess:
+     one you set by hand is an answer, and tidying a cut-out is not a request to
+     overrule it. */
+  let recoloured = null;
+  if(item.colorAuto !== false){
+    const colors = await recolourFromHandMask(item);
+    if(colors && colors[0] && colors[0].name !== item.color){
+      recoloured = colors[0].name;
+      item.color = recoloured;
+    }
+  }
+  await saveItems();
+  render();
+  syncMarkPanel(item);
+  if(recoloured) toast('Reading it from what you kept — ' + recoloured);
+}
+
+/* Back to the app's own answer: both the box and anything painted go, and the
+   session with them, so the next brush stroke starts from a fresh reading rather
+   than from the mask that was just abandoned. */
+async function startCutOver(item){
+  delete item.cutMark;
+  delete item.handMask;
+  _cut = null;
+  _cutPending = null;
+  _layCache.delete(item.id);
+  await saveItems();
+  openDetail(item.id);
+  render();
+}
+
+/* The heading and the start-over button are the only parts of the panel that
+   depend on whether anything has been stored for the piece, and a stroke changes
+   that. Patched in place rather than by rebuilding the sheet: a rebuild would be
+   correct, and it would also jump the scroll and swap the canvas out from under
+   a hand that is still painting on it. */
+function syncMarkPanel(item){
+  const head = document.querySelector('.mark-panel .mark-head');
+  if(!head) return;
+  const title = head.querySelector('.mark-title');
+  if(title){
+    title.textContent = item.handMask ? 'Cut by hand'
+                      : item.cutMark  ? 'Marked'
+                                      : 'Cut-out not right?';
+  }
+  const want = !!(item.handMask || item.cutMark);
+  let btn = head.querySelector('.mark-clear');
+  if(want && !btn){
+    btn = document.createElement('button');
+    btn.className = 'mark-clear';
+    btn.id = 'clearMarkBtn';
+    btn.textContent = 'start over';
+    btn.onclick = function(){ startCutOver(item); };
+    head.appendChild(btn);
+  }else if(!want && btn){
+    btn.remove();
+  }
+}
+
+/* The colour, measured over the pixels you decided were the piece. Null when
+   there is no mask, when it cannot be read, or when too little of it survives
+   to mean anything -- in every case the colour already on the item stands. */
+async function recolourFromHandMask(item){
+  if(!item || !item.image || !item.handMask) return null;
+  try{
+    const cv = await pngToAlphaMask(item.handMask);
+    const img = await loadImageFromDataUrl(item.image);
+    const measure = drawToCanvas(img, 420);
+    const bg = bgMaskFromAlpha(cv, measure.width, measure.height);
+    if(!bg) return null;
+    try{
+      const gains = estimateIlluminant(measure);
+      if(gains) applyGains(measure, gains);
+    }catch(e){ console.warn('white balance failed', e); }
+    const colors = detectColors(measure, bg);
+    return (colors && colors.length) ? colors : null;
+  }catch(e){
+    console.warn('re-reading colour from the painted mask failed', e);
+    return null;
+  }
+}
+
 /* Swaps in the transparent copy once it is ready. Synchronous render puts the
    ordinary photo up first, so the lay-out is never blank while this runs. */
 async function enhanceLayImages(){
@@ -6089,23 +6606,13 @@ async function enhanceLayImages(){
       const c = drawToCanvas(img, 420);
       let cut = false;
 
-      /* The model first, when it is installed. Its answer is remembered on the
-         piece, because two seconds is fine once and irritating on every visit
-         to the tab -- and because it means turning the lay-out off and on again
-         costs nothing.
+      /* A mask you painted has the final word. It outranks the box, and the box
+         outranks the automatic reading, in each case for the same reason: the
+         later answer was only given because the earlier one was wrong. */
+      if(item.handMask) cut = await applyMaskPng(c, item.handMask);
 
-         Kept at the model's own 320 square rather than at the canvas size: it
-         is what the model produced, it is a twentieth of the storage, and it
-         scales back up perfectly well for a silhouette. */
-      if(!item.cutMark){
-        if(!item.aiMask && await ensureModel()){
-          const m = await modelMask(c);
-          if(m){ item.aiMask = maskToPng(m, c.width, c.height); await saveItems(); }
-        }
-        if(item.aiMask) cut = await applyMaskPng(c, item.aiMask);
-      }
-      /* No model, or it found nothing, or you drew a box -- which outranks it,
-         having been drawn precisely because something was wrong. */
+      /* Nothing painted, or what was stored could not be read. Measure the
+         photograph, narrowed down by the box if one was drawn. */
       if(!cut) cut = liftForLayout(c, item.cutMark);
 
       const url = cut ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png') : null;
@@ -7004,27 +7511,14 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
-    +   '<div class="sb-title">Smart cut-out</div>'
-    +   '<div class="sb-sub">The lay-out lifts each piece off its background by measuring colours, '
-    +     'which works on a garment put down on something plain and gives up on a white shoe held over '
-    +     'a cream desk &mdash; they are the same colour with no edge between them. '
-    +     'This downloads a model that recognises the piece itself instead. '
-    +     'It runs on your phone, like everything else here: nothing is uploaded, and once downloaded it works offline.'
-    +   '</div>'
-    +   '<div class="sb-stat" id="modelState">Checking&hellip;</div>'
-    +   '<div id="modelActions"></div>'
-    + '</div>'
-
-    + '<div class="settings-block">'
     +   '<div class="sb-title">How this works</div>'
     +   '<div class="sb-sub">No account, no server, and not one request to anyone &mdash; the typefaces '
     +     'are served from beside the app rather than from Google. '
     +     'Colours are measured directly off your photos, categories come from a keyword dictionary, '
     +     'and outfits are scored on colour harmony, formality, warmth, how recently you wore things, '
-    +     'and which pieces you have worn together before. None of that is a model; it is arithmetic '
-    +     'you could check by hand. '
-    +     'The one exception is the cut-out above, which is a real model, is off unless you turn it on, '
-    +     'and still never sends a photograph anywhere.'
+    +     'and which pieces you have worn together before. None of it is a model &mdash; it is arithmetic '
+    +     'you could check by hand, and when it gets a cut-out wrong you fix it with your finger '
+    +     'in the item itself.'
     +   '</div>'
     +   '<div class="sb-stat">Right now: '+countGoodLooks(null)+' workable combinations from '+stats.count+' pieces.</div>'
     + '</div>'
@@ -7066,59 +7560,7 @@ function renderSettingsBody(){
   bindSettingsHandlers();
 }
 
-/* The smart cut-out's corner of Settings. Drawn from what is actually in the
-   cache rather than from a stored setting, so it cannot claim the model is
-   installed after the browser has evicted it. */
-async function renderModelBlock(){
-  const state1 = document.getElementById('modelState');
-  const acts = document.getElementById('modelActions');
-  if(!state1 || !acts) return;
-  const mb = Math.round(MODEL_BYTES/1e6);
-  if(!self.caches){
-    state1.textContent = 'This browser cannot store it, so it is unavailable here.';
-    acts.innerHTML = '';
-    return;
-  }
-  const on = await modelInstalled();
-  const cut = state.items.filter(function(i){ return i.aiMask; }).length;
-  state1.textContent = on
-    ? 'Installed. ' + (cut ? cut + ' of ' + state.items.length + ' pieces read by it so far.'
-                           : 'It will read each piece the first time you see it laid out.')
-    : 'Not installed. About ' + mb + ' MB, downloaded once and kept for offline.';
-  acts.innerHTML = on
-    ? '<button class="btn-secondary" id="modelRemoveBtn" style="margin-top:10px;">Remove it</button>'
-    : '<button class="btn-primary" id="modelGetBtn" style="margin-top:10px;">Download it (' + mb + ' MB)</button>';
-
-  const get = document.getElementById('modelGetBtn');
-  if(get) get.onclick = async function(){
-    get.disabled = true;
-    try{
-      await installModel(function(f){ get.textContent = 'Downloading… ' + Math.round(f*100) + '%'; });
-      get.textContent = 'Warming it up…';
-      /* Load it here rather than on the next lay-out, so any problem shows up
-         while you are still looking at the button that caused it. */
-      const ok = await ensureModel();
-      _layCache.clear();
-      toast(ok ? 'Smart cut-out is on' : 'Downloaded, but it would not start');
-    }catch(e){
-      toast('Download failed — ' + e.message);
-    }
-    renderSettingsBody();
-  };
-  const rm = document.getElementById('modelRemoveBtn');
-  if(rm) rm.onclick = async function(){
-    if(!safeConfirm('Remove the smart cut-out? Pieces go back to the colour-based cut.', false)) return;
-    rm.disabled = true; rm.textContent = 'Removing…';
-    await removeModel();
-    toast('Removed');
-    renderSettingsBody();
-    render();
-  };
-}
-
 function bindSettingsHandlers(){
-  renderModelBlock();
-
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
 
@@ -7465,6 +7907,15 @@ function attachDynamicHandlers(){
     state.tab = 'today';
     render();
     toast('Building around '+dusty.item.name);
+  });
+
+  /* A look you already own and have never worn. Opens it in the builder rather
+     than dropping it on Today, so you can look at it and change your mind --
+     it was never a suggestion, only an observation that you own the pieces. */
+  document.querySelectorAll('[data-try]').forEach(function(el){
+    el.onclick = function(){
+      openBuilder({seedIds: el.getAttribute('data-try').split(',')});
+    };
   });
 
   /* --- the deck of generated looks travels under your thumb --- */

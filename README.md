@@ -231,8 +231,8 @@ its edges, and a person looking only at those pixels would hesitate too.
 Photograph pale clothes on something darker — see the list above — or draw a box
 round the piece, which re-reads the colour from inside it.
 
-Or turn on **Smart cut-out**, which recognises the garment rather than measuring
-around it and gets all 180 of those cases right. See below.
+And when neither is enough, [cut it by hand](#cutting-by-hand) — the app shows you
+what it worked out and hands you two brushes to fix it.
 
 One thing worth knowing about how it fails. When the app *can* separate the
 piece, it gets the colour right; when it cannot, it used to judge the colour off
@@ -314,6 +314,37 @@ What it used to do was say nothing about it. You pressed *What should I wear?*
 with no shoes logged and got a card with a title, a percentage fit and no shoes
 on it, which reads as a finished answer rather than the best available one. It
 now says so on the card, with a way to add the missing pieces.
+
+### What goes with what — on trial
+
+Four blocks at the bottom of **Stats**, each marked `TEST` on screen, all of
+them provisional. They answer a question the rest of the app does not: not what
+you have *worn*, but what actually *works*.
+
+The distinction matters and the app had been quietly conflating the two. A piece
+gathers dust either because you do not feel like it or because it goes with
+nothing you own — only the second is a wardrobe problem, and nothing here could
+tell them apart. On the demo wardrobe the difference is immediate: a white
+oxford shirt sits in *Most worn* at six wears **and** in *Barely connects* at
+six looks out of 156. Worn constantly, works with almost nothing.
+
+| Block | What it says |
+|---|---|
+| **What goes with what** | the pieces appearing in the most workable looks — your anchors |
+| **Barely connects** | the pieces appearing in the fewest, and the one thing that would rescue each |
+| **Never worn together** | complete looks your wardrobe can already make and you have never put on — nothing to buy |
+| **Worth reconsidering** | in no working look *and* never worn, with what would fix it before you write it off |
+
+All four come from a single pass over the same cached list of workable
+combinations, so the whole section costs one traversal. Measured at 500 pieces:
+6 ms for the analysis, 147 ms for the entire Stats tab.
+
+**One honest limit.** The counter only ever looks at the first 22 pieces in each
+category, so that counting stays instant. Past that the totals are a sample
+rather than the truth, and the section says so rather than printing a confident
+wrong number — on a large wardrobe the real count runs into the thousands.
+
+These are on trial and may be removed. That is what the `TEST` tags are for.
 
 ### What else was swept, and found sound
 
@@ -424,67 +455,83 @@ A piece that could not be lifted at all is framed as a photograph — rounded,
 softly shadowed — rather than left as a bare square, so it reads as a picture of
 the thing on a table rather than a cut-out that went wrong.
 
-### The smart cut-out
+### Cutting by hand
 
 Everything described above is arithmetic on colours: measure the frame's border,
 decide what is backdrop, flood inward. It works on a garment put down on
 something plain, and it cannot be made to work on a **white trainer held up in a
 lit room** — a white shoe and a cream desk are the same colour with no edge
-between them. That case is why *Settings → Smart cut-out* exists.
+between them.
 
-Measured on the two real photographs this app was tuned against:
+That case used to be answered by an 18 MB segmentation model, downloadable from
+Settings. It has been taken out. What replaced it is your finger: the app shows
+you the cut it worked out, against a chequerboard so you can see what has gone
+transparent, and hands you a box and two brushes.
 
-| | the colour-based cut | the model |
-|---|---|---|
-| black shirt on a bed | a strip of bedding down one side, fragments along the bottom | clean |
-| white trainer held in a room | **refuses outright** | cuts the shoe, and takes the hand holding it off too |
+| | |
+|---|---|
+| **Box** | drag a box round the piece — one gesture, and it re-reads the colour from inside it |
+| **Rub out** | drag over anything that is not the piece: the desk, your hand, a shadow |
+| **Bring back** | drag over any part of the piece the cut took away |
 
-It is **off by default and downloaded only if you ask**. The app is about 330 KB
-and complete without it; pressing the button fetches about 18 MB once. Nothing
-is uploaded, ever — the model runs on your phone like everything else here, and
-once downloaded it works with no signal.
+Fine or broad, undo, start over. A painted mask outranks a box, a box outranks
+the automatic reading, and in both cases for the same reason: the later answer
+was only given because the earlier one was wrong.
 
-| File | Size | Licence |
-|---|---|---|
-| `u2netp.onnx` — U²-Net (small) | 4.6 MB | Apache 2.0 |
-| ONNX Runtime Web (WASM + loader) | 13.6 MB | MIT |
+**How often this is needed.** Measured over 180 renders — nine neutrals on four
+surfaces under five lighting conditions, the light falling on the whole scene:
 
-Nothing was trained here. These are published weights, used as published.
+| the automatic cut, against the garment's true silhouette | |
+|---|---|
+| refuses outright | 26 / 180 |
+| below 0.80 IoU | 65 / 180 |
+| at or above 0.95 IoU | 94 / 180 |
+| median IoU where it does not refuse | **0.987** |
 
-**It fixes the colour too, which was the bigger surprise.** Every colour reading
-this app still got wrong was a *mask* problem rather than a colour problem: a
-pale garment on a pale surface, where the flood eats the garment and the reading
-is taken off whatever is left standing. Handing the colour reader the model's
-mask instead, across the same 180 hard renders — nine neutrals over four
-surfaces under five lighting conditions:
+So it is bimodal rather than mediocre: when it separates the piece it is
+essentially exact, and on about a third of hard photographs it either gives up or
+mangles it. Those are the ones worth a few strokes. A refusal deliberately seeds
+as *all of this is the piece*, so there is a background to rub away — seeding it
+empty would hand you a blank frame and ask you to trace a garment onto it, which
+is not something anybody finishes on a phone.
+
+**What it is worth to the colour reading — honestly, not much.** Over the same
+180 renders, comparing what the app says on its own against what it says off a
+mask that is exactly the garment's silhouette:
 
 | | correct |
 |---|---|
-| the colour-based mask | 168 / 180 |
-| the model's mask | **180 / 180** |
+| the app on its own | 145 / 180 |
+| off a perfect mask | 147 / 180 |
 
-Nothing that was right became wrong, and the same numbers hold measured through
-the real import path rather than the mask alone. Two of the twelve it fixes are
-**black on a near-black surface under uneven light** — the failure issue #6 was
-opened for, which could not be reproduced in flat light and turns out to have
-been alive in uneven light all along.
+Two. The colour reader already falls back to the middle of the frame when the
+mask fails, which recovers most of what a better mask would have given it, and
+what remains is not a mask problem: it is a white shirt in a scene darkened by a
+third genuinely having silver-ish pixels, and the app naming the pixels it has.
+Skipping the white-balance correction moves that 147 to 144, so the correction
+is not the culprit either.
 
-The silhouette goes to the category guess as well, and that stays correct on
-every shape under every condition.
+The earlier version of this file reported the model taking the colour from
+168/180 to 180/180. That figure does not reproduce here — a *perfect* mask
+reaches 147 on this sweep — so it is not restated as fact. The likeliest
+explanation is that the sweep it came from lit only the backdrop and pasted an
+unlit garment on top, which leaves the mask as almost the only thing that can go
+wrong; lighting the whole scene, as a lamp does, makes exposure the larger error
+and no mask can help with that. Measured that way here, the same comparison is
+165 → 168.
 
-**What it costs.** Two to three seconds per piece, once — the mask is kept with
-the piece as a small PNG (6–7 KB measured) so it never runs twice, and it
-survives reloads. A box you have drawn still outranks it, because a box was
-drawn precisely when something was wrong.
+So the case for cutting by hand is not an accuracy table. It is that on the third
+of photographs where the arithmetic fails, there is now an answer that cannot be
+wrong, because you are looking at it while you give it — and it costs nothing to
+carry. The app is 380 KB with no model in it, and the masks are
+6–10 KB per piece (9 KB measured on a shirt), stored as PNGs beside the photo.
 
-**Where it is kept.** In a cache of its own, not the one named for the app's
-version. Every release retires the version cache; putting 18 MB in there would
-mean re-downloading 18 MB on every update, over mobile data, for a file that has
-not changed. *Remove it* takes the files **and** the masks it produced — leaving
-its results behind would look like it had not been removed.
-
-The claim "there is no AI in this app" was true until this, and the Settings
-text now says so plainly rather than quietly going out of date.
+**The 18 MB is removed automatically.** The model lived in a cache of its own,
+`the-rail-model-v1`, so that app updates would not throw it away. The service
+worker no longer keeps that cache, and its `activate` handler deletes any cache
+it does not recognise — so the first launch of this version frees the space on
+its own. The masks the model had worked out are dropped on load for the same
+reason: nothing left in the app can produce or check them.
 
 ### Turning the cut off
 

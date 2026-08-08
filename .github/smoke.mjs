@@ -654,6 +654,399 @@ try {
   });
   for (const m of markMisses) failures.push(`marking: ${m}`);
 
+  // Cutting by hand. This replaced an 18 MB segmentation model, so the bar is
+  // not "the brushes draw something" -- it is that a person with a finger can
+  // reach the same two outcomes the model was carried for: a clean silhouette
+  // on a photograph the arithmetic cannot read, and the right colour off it.
+  //
+  // The fixture is a garment of known extent on a plain surface, so every
+  // assertion below is about a pixel whose correct answer is known in advance
+  // rather than about the picture looking plausible.
+  const handMisses = await page.evaluate(async () => {
+    const missed = [];
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 200;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#d8d3c7'; cx.fillRect(0, 0, 200, 200);
+    cx.fillStyle = '#2f3d66'; cx.fillRect(55, 45, 90, 110);   // 0.275-0.725 x, 0.225-0.775 y
+    const kept = state.items.slice();
+    const it = {
+      id: 'handcut-test', name: 'Navy test top', category: 'top', color: 'navy',
+      warmth: 3, formality: 3, createdAt: Date.now(), image: cv.toDataURL('image/png'),
+    };
+    state.items = [it];
+
+    const done = () => {
+      state.items = kept;
+      _cut = null; _cutTool = 'box';
+      document.getElementById('detailOverlay').classList.remove('open');
+      return [...new Set(missed)];
+    };
+
+    openDetail(it.id);
+    const stage0 = document.getElementById('markStage');
+    if (!stage0) return done(['the sheet offered no stage to paint on']);
+    for (let i = 0; i < 100 && stage0.getBoundingClientRect().height < 1; i++) await wait(50);
+    if (stage0.getBoundingClientRect().height < 1) return done(['the photo never appeared to paint on']);
+
+    const tool = (name) => {
+      const b = document.querySelector(`[data-cut-tool="${name}"]`);
+      if (!b) { missed.push(`there is no "${name}" tool`); return false; }
+      b.click();
+      return true;
+    };
+    const at = (fx, fy) => {
+      const r = document.getElementById('markStage').getBoundingClientRect();
+      return {
+        clientX: r.left + r.width * fx, clientY: r.top + r.height * fy,
+        pointerId: 1, bubbles: true,
+      };
+    };
+    const paint = async (x0, y0, x1, y1) => {
+      const el = document.getElementById('markStage');
+      el.dispatchEvent(new PointerEvent('pointerdown', at(x0, y0)));
+      for (let i = 1; i <= 6; i++) {
+        const t = i / 6;
+        el.dispatchEvent(new PointerEvent('pointermove', at(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)));
+      }
+      el.dispatchEvent(new PointerEvent('pointerup', at(x1, y1)));
+      await wait(650);   // longer than the settle timer
+    };
+    // The mask is the thing under test, so it is read directly rather than
+    // inferred from the preview -- the preview could be right while the stored
+    // answer is wrong, which is the failure that would actually ship.
+    const alphaAt = (fx, fy) => {
+      const S = _cut.mask.width;
+      const px = Math.min(S - 1, Math.floor(fx * S));
+      const py = Math.min(S - 1, Math.floor(fy * S));
+      return _cut.mask.getContext('2d', { willReadFrequently: true })
+        .getImageData(px, py, 1, 1).data[3];
+    };
+
+    if (!tool('erase')) return done();
+    await wait(400);
+    if (!document.getElementById('markStage').classList.contains('cutting')) {
+      return done(['picking a brush did not put the stage into cutting mode']);
+    }
+    if (!_cut || _cut.id !== it.id) return done(['picking a brush opened no session']);
+
+    // The seed is the app's own answer, which on this photograph is a clean cut.
+    // If that is not true the rest of the test is measuring the wrong thing.
+    if (alphaAt(0.5, 0.5) < 128) missed.push('the brushes started from a mask with the garment already gone');
+    if (alphaAt(0.04, 0.04) > 128) missed.push('the brushes started from a mask that had kept the backdrop');
+
+    // Rub out, across the middle of the garment.
+    await paint(0.40, 0.5, 0.60, 0.5);
+    if (alphaAt(0.5, 0.5) > 128) missed.push('rubbing out over the garment left it in the mask');
+    if (!it.handMask) missed.push('a stroke stored no mask on the piece');
+    else {
+      if (it.handMask.slice(0, 15) !== 'data:image/png;') missed.push('the stored mask is not a PNG');
+      if (it.handMask.length > 60000) {
+        missed.push(`a stored mask is ${Math.round(it.handMask.length / 1024)}KB, too much per piece`);
+      }
+      // Through storage and back. A mask that paints correctly and cannot be
+      // restored is worth nothing -- this is the round trip the lay-out uses.
+      const back = document.createElement('canvas');
+      back.width = back.height = 200;
+      const bx = back.getContext('2d');
+      bx.fillStyle = '#2f3d66'; bx.fillRect(0, 0, 200, 200);
+      if (!(await applyMaskPng(back, it.handMask))) missed.push('the stored mask could not be put back');
+      else {
+        const d = bx.getImageData(0, 0, 200, 200).data;
+        const aa = (fx, fy) => d[((Math.floor(fy * 200) * 200) + Math.floor(fx * 200)) * 4 + 3];
+        if (aa(0.5, 0.5) > 128) missed.push('restored from storage, the rubbed-out stroke came back');
+        if (aa(0.5, 0.30) < 128) missed.push('restored from storage, the untouched garment was gone');
+      }
+    }
+
+    // The panel has to admit what it now holds. The sheet is not rebuilt after a
+    // stroke, so without this you can paint, look for the way back, and not find
+    // one until you have closed the sheet and opened it again.
+    const title = document.querySelector('.mark-panel .mark-title');
+    if (!title || title.textContent !== 'Cut by hand') {
+      missed.push(`after a stroke the panel still called itself "${title ? title.textContent : '(gone)'}"`);
+    }
+    if (!document.getElementById('clearMarkBtn')) {
+      missed.push('after a stroke there was no way to start over without reopening the sheet');
+    }
+
+    // Undo. Not "the button exists" -- that the pixel it took away returns.
+    const undo = document.getElementById('cutUndoBtn');
+    if (!undo) missed.push('there is no undo');
+    else if (undo.disabled) missed.push('undo was disabled with a stroke on the mask');
+    else {
+      undo.click();
+      await wait(650);
+      if (alphaAt(0.5, 0.5) < 128) missed.push('undo did not bring the rubbed-out garment back');
+      // Back to no strokes means back to the app's own answer, and storing a
+      // copy of that is one more thing to keep in step for no gain.
+      if (it.handMask) missed.push('undoing the only stroke left a stored mask behind');
+      // and the panel has to go back with it, both ways
+      if (document.getElementById('clearMarkBtn')) {
+        missed.push('undoing back to nothing left "start over" offering to undo nothing');
+      }
+    }
+
+    // Bring back, over a corner of backdrop the app had dropped.
+    if (!tool('restore')) return done();
+    await wait(400);
+    await paint(0.05, 0.05, 0.13, 0.05);
+    if (alphaAt(0.08, 0.05) < 128) missed.push('bringing back over the backdrop did not keep it');
+    if (!it.handMask) missed.push('bringing back stored no mask');
+
+    // Start over drops both answers, not just the one you can see.
+    it.cutMark = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
+    openDetail(it.id);
+    await wait(400);
+    const over = document.getElementById('clearMarkBtn');
+    if (!over) missed.push('a hand-cut piece offered no way to start over');
+    else {
+      over.click();
+      await wait(500);
+      if (it.handMask) missed.push('starting over left the painted mask in place');
+      if (it.cutMark) missed.push('starting over left the box in place');
+    }
+
+    // And a box, being the coarser answer, replaces a painted one rather than
+    // sitting silently underneath it where neither is what you would expect.
+    it.handMask = 'data:image/png;base64,iVBORw0KGgo=';
+    _cutTool = 'box';
+    openDetail(it.id);
+    await wait(300);
+    const el = document.getElementById('markStage');
+    el.dispatchEvent(new PointerEvent('pointerdown', at(0.2, 0.2)));
+    el.dispatchEvent(new PointerEvent('pointermove', at(0.5, 0.5)));
+    el.dispatchEvent(new PointerEvent('pointerup', at(0.8, 0.8)));
+    await wait(600);
+    if (it.handMask) missed.push('drawing a box left the old painted mask on the piece');
+    if (!it.cutMark) missed.push('drawing a box after painting stored no box');
+
+    return done();
+  });
+  for (const m of handMisses) failures.push(`cutting by hand: ${m}`);
+
+  // The photograph the arithmetic refuses. Measured over 180 renders -- nine
+  // neutrals on four surfaces under five lighting conditions -- the automatic cut
+  // refuses outright on 26 and lands below an IoU of 0.80 against the true
+  // silhouette on 65. So this is not a corner: it is roughly a third of the hard
+  // cases, and it is the whole reason the brushes exist.
+  //
+  // What matters is where they *start* from. A refusal must seed as "all of this
+  // is the piece", so there is a background to rub away; seeding it empty would
+  // hand someone a blank frame and ask them to trace a garment onto it, which is
+  // not a thing anybody finishes on a phone.
+  const refusedSeed = await page.evaluate(async () => {
+    const missed = [];
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    // grey garment on a grey table: one colour, no edge, and a border too varied
+    // to model -- this is one of the 26 the automatic cut gives up on.
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 240;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.fillStyle = '#9a9a96'; cx.fillRect(0, 0, 240, 240);
+    const im = cx.getImageData(0, 0, 240, 240);
+    let s = 5;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    for (let i = 0; i < im.data.length; i += 4) {
+      const n = (rnd() - 0.5) * 24;
+      im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n;
+    }
+    cx.putImageData(im, 0, 0);
+    cx.fillStyle = '#8a8a86'; cx.fillRect(60, 55, 120, 130);
+
+    const kept = state.items.slice();
+    const it = {
+      id: 'refused-test', name: 'Grey on grey', category: 'top', color: 'grey',
+      warmth: 3, formality: 3, createdAt: Date.now(), image: cv.toDataURL('image/png'),
+    };
+    state.items = [it];
+    const done = () => {
+      state.items = kept;
+      _cut = null; _cutTool = 'box';
+      document.getElementById('detailOverlay').classList.remove('open');
+      return [...new Set(missed)];
+    };
+
+    // First, that this fixture really does defeat the arithmetic -- otherwise the
+    // assertion below is about the wrong branch and would pass for free.
+    const probe = drawToCanvas(await loadImageFromDataUrl(it.image), 420);
+    if (liftForLayout(probe, null)) {
+      missed.push('the grey-on-grey fixture no longer defeats the automatic cut, so the refusal branch is untested');
+    }
+
+    openDetail(it.id);
+    const st = document.getElementById('markStage');
+    if (!st) return done(['the sheet offered no stage']);
+    for (let i = 0; i < 100 && st.getBoundingClientRect().height < 1; i++) await wait(50);
+    document.querySelector('[data-cut-tool="erase"]').click();
+    await wait(600);
+    if (!_cut || _cut.id !== it.id) return done(['a refused photograph opened no session to paint on']);
+
+    const S = _cut.mask.width;
+    const mx = _cut.mask.getContext('2d', { willReadFrequently: true });
+    const d = mx.getImageData(0, 0, S, S).data;
+    let opaque = 0;
+    for (let i = 0; i < S * S; i++) if (d[i * 4 + 3] >= 128) opaque++;
+    const frac = opaque / (S * S);
+    if (frac < 0.99) {
+      missed.push(`a refused photograph seeded with only ${Math.round(frac * 100)}% of the frame kept, so there is nothing to rub away`);
+    }
+    return done();
+  });
+  for (const m of refusedSeed) failures.push(`cutting by hand: ${m}`);
+
+  // And the lay-out has to actually use it. Everything above tests the mask and
+  // the storage round trip; this tests the two lines that decide a painted mask
+  // outranks the arithmetic. Without them every stroke would be stored correctly
+  // and change nothing you can see, which is the failure that would ship
+  // quietest.
+  const layUsesHand = await page.evaluate(async () => {
+    const missed = [];
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 200;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#d8d3c7'; cx.fillRect(0, 0, 200, 200);
+    cx.fillStyle = '#2f3d66'; cx.fillRect(45, 40, 110, 120);
+
+    // a mask that keeps only a small square in the middle -- nothing the
+    // arithmetic would ever produce, so if the lay-out honours it the picture
+    // must come back nearly empty
+    const mk = document.createElement('canvas');
+    mk.width = mk.height = 320;
+    const mx = mk.getContext('2d');
+    mx.fillStyle = '#000'; mx.fillRect(0, 0, 320, 320);
+    mx.fillStyle = '#fff'; mx.fillRect(140, 140, 40, 40);
+
+    const kept = state.items.slice();
+    const it = {
+      id: 'lay-hand-test', name: 'Navy test top', category: 'top', color: 'navy',
+      warmth: 3, formality: 3, createdAt: Date.now(), image: cv.toDataURL('image/png'),
+      handMask: mk.toDataURL('image/png'),
+    };
+    state.items = [it];
+
+    const host = document.createElement('div');
+    host.innerHTML = '<img data-lay-img="lay-hand-test" alt="">';
+    document.body.appendChild(host);
+    const img = host.querySelector('img');
+
+    const run = async () => {
+      _layCache.delete(it.id);
+      img.removeAttribute('src');
+      img.className = '';
+      await enhanceLayImages();
+      for (let i = 0; i < 60 && !img.getAttribute('src'); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return img.getAttribute('src');
+    };
+
+    const painted = await run();
+    if (!painted) {
+      missed.push('a piece with a painted mask produced no lay-out picture at all');
+    } else {
+      const decoded = await loadImageFromDataUrl(painted);
+      const t = document.createElement('canvas');
+      t.width = decoded.naturalWidth; t.height = decoded.naturalHeight;
+      const tx = t.getContext('2d', { willReadFrequently: true });
+      tx.drawImage(decoded, 0, 0);
+      const d = tx.getImageData(0, 0, t.width, t.height).data;
+      let opaque = 0;
+      for (let i = 0; i < t.width * t.height; i++) if (d[i * 4 + 3] >= 128) opaque++;
+      const frac = opaque / (t.width * t.height);
+      // the square is 40/320 on a side, about 1.6% of the frame; the outline the
+      // lay-out draws round a piece widens it, so the bar is generous
+      if (frac > 0.25) {
+        missed.push(`the lay-out ignored the painted mask: ${Math.round(frac * 100)}% of the picture survived where about 2% was kept`);
+      }
+    }
+
+    delete it.handMask;
+    const auto = await run();
+    if (auto && painted && auto === painted) {
+      missed.push('the lay-out gave the same picture with and without a painted mask');
+    }
+
+    host.remove();
+    state.items = kept;
+    return [...new Set(missed)];
+  });
+  for (const m of layUsesHand) failures.push(`cutting by hand: ${m}`);
+
+  // The colour, read off a mask you painted. This is the reason the model was
+  // wired into the colour reader at all, and the reason removing it had to leave
+  // something in its place: every colour this app gets wrong is a *mask*
+  // problem, not a colour problem. A white garment on a white sheet -- under
+  // noise, falloff and a cast shadow at once -- reads grey off the automatic
+  // mask, because the flood eats the garment and the reading comes off what is
+  // left standing.
+  //
+  // So the claim under test is that a hand-painted mask fixes it, on the same
+  // fixture the model was measured against.
+  const handColour = await page.evaluate(async () => {
+    const missed = [];
+    const W = 560, cv = document.createElement('canvas');
+    cv.width = cv.height = W;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#f4f4f2'; g.fillRect(0, 0, W, W);
+    const im = g.getImageData(0, 0, W, W), dd = im.data;
+    let s = 7;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    for (let i = 0; i < dd.length; i += 4) { const n = (rnd() - 0.5) * 26; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
+    g.putImageData(im, 0, 0);
+    const grad = g.createLinearGradient(0, 0, W, W);
+    grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.34)');
+    g.fillStyle = grad; g.fillRect(0, 0, W, W);
+    g.save();
+    g.globalAlpha = 0.35; g.filter = 'blur(18px)'; g.fillStyle = '#000';
+    g.beginPath(); g.ellipse(W * 0.5, W * 0.76, W * 0.34, W * 0.09, 0, 0, 7); g.fill();
+    g.restore();
+    const S = 400, l = document.createElement('canvas');
+    l.width = l.height = S;
+    DEMO_SHAPES.top(l.getContext('2d'), colorByName('white').hex, S, S, {});
+    const side = Math.round(W * 0.6);
+    const off = Math.round((W - side) / 2);
+    g.drawImage(l, off, off, side, side);
+
+    // What the app says on its own. Asserted to be *wrong*, because if this
+    // fixture ever stops defeating the automatic reading then everything below
+    // it is passing for free and needs replacing with something harder.
+    const file = await new Promise((r) => cv.toBlob((b) => r(new File([b], 'h.png', { type: 'image/png' })), 'image/png'));
+    const auto = await processPhoto(file);
+    const autoName = auto.colors.length ? auto.colors[0].name : '(nothing)';
+    if (autoName === 'white') {
+      missed.push('the hard fixture no longer defeats the automatic reading, so this test proves nothing — find a harder one');
+    }
+
+    // The mask a careful hand would have painted: exactly the garment, taken
+    // from the shape that was drawn into the scene. Taken from its alpha rather
+    // than its colour, so this stays a test of the colour reader rather than of
+    // whether a white shirt can be told from a white sheet by brightness.
+    const mk = document.createElement('canvas');
+    mk.width = mk.height = 320;
+    const mx = mk.getContext('2d', { willReadFrequently: true });
+    mx.drawImage(l, off / W * 320, off / W * 320, side / W * 320, side / W * 320);
+    const md = mx.getImageData(0, 0, 320, 320);
+    for (let i = 0; i < 320 * 320; i++) {
+      const v = md.data[i * 4 + 3] >= 128 ? 255 : 0;
+      md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = v;
+      md.data[i * 4 + 3] = 255;
+    }
+    mx.putImageData(md, 0, 0);
+
+    const got = await recolourFromHandMask({
+      id: 'x', image: cv.toDataURL('image/png'), handMask: mk.toDataURL('image/png'),
+    });
+    const name = got && got.length ? got[0].name : '(nothing)';
+    if (name !== 'white') {
+      missed.push(`off a hand-painted mask a white garment on a white sheet still read as "${name}" (the app on its own said "${autoName}")`);
+    }
+    return missed;
+  });
+  for (const m of handColour) failures.push(`cutting by hand: ${m}`);
+
   // The cut can be switched off from the lay-out itself. The cut is a guess,
   // and when it guesses wrong there has to be a way to see the photograph
   // instead of arguing with it -- so what is under test is that the switch
@@ -1145,128 +1538,6 @@ try {
   });
   for (const m of swapWearMisses) failures.push(`swap and wear: ${m}`);
 
-  // The smart cut-out: an 18 MB segmentation model that is *off* unless asked
-  // for. The thing most worth protecting is not that it works -- it is that the
-  // app is untouched without it. Someone who never presses the button must not
-  // pay a byte or lose a feature, and every other test in this file runs in
-  // exactly that state, so they are the evidence for the second half.
-  //
-  // What is checked here is the first half: the files exist to be fetched, the
-  // app does not reach for them on its own, and installing and removing does
-  // what it says.
-  const aiMisses = await page.evaluate(async () => {
-    const missed = [];
-    if (typeof modelInstalled !== 'function') return ['the smart cut-out is not wired in at all'];
-    if (await modelInstalled()) missed.push('the model was already installed on a fresh profile');
-    // it must not have been loaded, either -- ensureModel returns null rather
-    // than fetching 18 MB behind someone's back
-    if (await ensureModel()) missed.push('the model loaded without having been installed');
-    // and the cut-out must still work without it
-    const c = document.createElement('canvas');
-    c.width = c.height = 200;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.fillStyle = '#d8d3c7'; x.fillRect(0, 0, 200, 200);
-    x.fillStyle = '#2f3d66'; x.fillRect(55, 45, 90, 110);
-    if (!isolateForLayout(c)) missed.push('the colour-based cut stopped working when the model is absent');
-    if (await modelMask(document.createElement('canvas'))) missed.push('modelMask answered without a model');
-    return missed;
-  });
-  for (const m of aiMisses) failures.push(`smart cut-out: ${m}`);
-
-  // The files themselves. A 404 here would mean the button offers a download
-  // that cannot complete, which is only discoverable by pressing it.
-  for (const f of ['ai/u2netp.onnx', 'ai/ort.wasm.bundle.min.mjs',
-    'ai/ort-wasm-simd-threaded.wasm', 'ai/ort-wasm-simd-threaded.mjs',
-    'ai/LICENSE-u2net.txt', 'ai/LICENSE-onnxruntime.txt']) {
-    const res = await page.request.head(`${BASE}/${f}`);
-    if (!res.ok()) failures.push(`smart cut-out: ${f} is not there to download (${res.status()})`);
-  }
-
-  // Installing, using and removing it. Slow -- the model really does run -- but
-  // this is the one path that touches storage the user cannot see, and getting
-  // removal wrong leaves 18 MB behind for good.
-  const aiLive = await page.evaluate(async () => {
-    const missed = [];
-    try { await installModel(); } catch (e) { return [`install failed: "${e.message}"`]; }
-    if (!(await modelInstalled())) missed.push('it reported installed but the files are not in the cache');
-    const sess = await ensureModel();
-    if (!sess) return missed.concat('the model would not start after installing');
-
-    // a garment on a plain surface: the mask must find it and mark the rest
-    const c = document.createElement('canvas');
-    c.width = c.height = 300;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.fillStyle = '#d8d3c7'; x.fillRect(0, 0, 300, 300);
-    x.fillStyle = '#2f3d66'; x.fillRect(90, 70, 120, 160);
-    const m = await modelMask(c);
-    if (!m) missed.push('the model found nothing in a plain photo of a garment');
-    else {
-      if (m[150 * 300 + 150]) missed.push('the model marked the middle of the garment as background');
-      if (!m[5 * 300 + 5]) missed.push('the model kept the corner of the backdrop');
-      // and the round trip through storage has to preserve it
-      const png = maskToPng(m, 300, 300);
-      if (!png || png.slice(0, 15) !== 'data:image/png;') missed.push('the mask did not become a PNG');
-      else if (png.length > 60000) missed.push(`a stored mask is ${Math.round(png.length / 1024)}KB, which is too much per piece`);
-      const c2 = document.createElement('canvas');
-      c2.width = c2.height = 300;
-      const x2 = c2.getContext('2d');
-      x2.fillStyle = '#2f3d66'; x2.fillRect(0, 0, 300, 300);
-      if (!(await applyMaskPng(c2, png))) missed.push('a stored mask could not be put back');
-      else {
-        const d2 = c2.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 300, 300).data;
-        if (d2[(150 * 300 + 150) * 4 + 3] < 128) missed.push('the restored mask cut away the garment');
-        if (d2[(5 * 300 + 5) * 4 + 3] > 128) missed.push('the restored mask kept the backdrop');
-      }
-    }
-    // The reason the model is wired into the colour reader at all. A white
-    // garment on a white sheet, under texture and falloff and a cast shadow at
-    // once, reads *grey* off the colour-based mask -- the flood eats the
-    // garment and the reading comes off what is left. It is the shape of every
-    // colour failure that survived a night of tuning.
-    //
-    // Measured across all 180 of the hard renders: 168 right without the model
-    // and 180 with it. This is one of the twelve, kept as the sentinel, because
-    // running all 180 here would add ten minutes to the build.
-    const hard = (() => {
-      const W = 560, cv = document.createElement('canvas');
-      cv.width = cv.height = W;
-      const g = cv.getContext('2d', { willReadFrequently: true });
-      g.fillStyle = '#f4f4f2'; g.fillRect(0, 0, W, W);
-      const im = g.getImageData(0, 0, W, W), dd = im.data;
-      let s = 7;
-      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-      for (let i = 0; i < dd.length; i += 4) { const n = (rnd() - 0.5) * 26; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
-      g.putImageData(im, 0, 0);
-      const grad = g.createLinearGradient(0, 0, W, W);
-      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.34)');
-      g.fillStyle = grad; g.fillRect(0, 0, W, W);
-      g.save();
-      g.globalAlpha = 0.35; g.filter = 'blur(18px)'; g.fillStyle = '#000';
-      g.beginPath(); g.ellipse(W * 0.5, W * 0.76, W * 0.34, W * 0.09, 0, 0, 7); g.fill();
-      g.restore();
-      const S = 400, l = document.createElement('canvas');
-      l.width = l.height = S;
-      DEMO_SHAPES.top(l.getContext('2d'), colorByName('white').hex, S, S, {});
-      const side = Math.round(W * 0.6);
-      g.drawImage(l, Math.round((W - side) / 2), Math.round((W - side) / 2), side, side);
-      return cv;
-    })();
-    const file = await new Promise((r) => hard.toBlob((b) => r(new File([b], 'h.png', { type: 'image/png' })), 'image/png'));
-    const read = await processPhoto(file);
-    const got = read.colors.length ? read.colors[0].name : '(nothing)';
-    if (got !== 'white') {
-      missed.push(`with the model installed, a white garment on a white sheet still read as "${got}"`);
-    }
-
-    // removing it must take the cache *and* the masks it produced
-    state.items = state.items.slice(0, 2);
-    state.items.forEach((i) => { i.aiMask = 'data:image/png;base64,x'; });
-    await removeModel();
-    if (await modelInstalled()) missed.push('removing it left the files in the cache');
-    if (state.items.some((i) => i.aiMask)) missed.push('removing it left its masks on the pieces');
-    return missed;
-  });
-  for (const m of aiLive) failures.push(`smart cut-out: ${m}`);
 
   // "What am I missing?" counts what the wardrobe can make, then works out
   // which single piece would add the most. It is the largest untested thing in
@@ -1347,6 +1618,86 @@ try {
     return missed;
   });
   for (const m of gapMisses) failures.push(`gaps: ${m}`);
+
+  // "What goes with what" -- four readings of how well the wardrobe connects to
+  // itself, all on trial and all marked TEST on screen. The numbers are the
+  // point of them, so the numbers are what is checked: a piece's count is how
+  // many workable looks it is actually in, and "never worn together" means the
+  // wear log really has no day holding all three.
+  const compatMisses = await page.evaluate(async () => {
+    const missed = [];
+    if (typeof compatibilityReport !== 'function') return ['it is not wired in at all'];
+    const mk = (name, cat, color, warm, form) => ({
+      id: name.replace(/\W/g, '') + Math.random().toString(36).slice(2, 7),
+      name, category: cat, color, warmth: warm, formality: form,
+      tags: [], image: null, createdAt: Date.now(), wearCount: 0,
+    });
+    // small enough to count by hand
+    const tee = mk('White tee', 'top', 'white', 2, 2);
+    const jumper = mk('Grey jumper', 'top', 'grey', 4, 2);
+    const jeans = mk('Blue jeans', 'bottom', 'blue', 3, 2);
+    const shoes = mk('White trainers', 'footwear', 'white', 2, 2);
+    state.items = [tee, jumper, jeans, shoes];
+    state.wearLog = []; state.outfits = []; state.plans = {};
+    _baseCache = null;
+
+    const r = compatibilityReport();
+    // every count must equal the number of looks that piece is really in
+    for (const e of r.ranked) {
+      const truth = r.unworn.concat([]).length >= 0
+        ? goodBases().filter((b) => b.some((i) => i.id === e.item.id)).length : -1;
+      if (e.n !== truth) missed.push(`${e.item.name} is reported in ${e.n} looks but is in ${truth}`);
+    }
+    if (r.ranked.some((e) => e.item.category === 'accessory')) {
+      missed.push('an accessory was ranked, though no look is built from one');
+    }
+    // with nothing worn, every workable look is a look never worn
+    if (r.unworn.length !== r.total) {
+      missed.push(`nothing has been worn, but only ${r.unworn.length} of ${r.total} count as never worn`);
+    }
+    // wear one of them and it must drop out
+    if (r.total) {
+      const first = r.unworn[0];
+      state.wearLog = [{ date: todayKey(), itemIds: first.map((i) => i.id), title: 'worn' }];
+      const r2 = compatibilityReport();
+      if (r2.unworn.length !== r.unworn.length - 1) {
+        missed.push(`wearing one look changed "never worn" from ${r.unworn.length} to ${r2.unworn.length}`);
+      }
+      if (r2.unworn.some((b) => b.map((i) => i.id).sort().join('|') === first.map((i) => i.id).sort().join('|'))) {
+        missed.push('a look that was worn is still listed as never worn');
+      }
+      // and it must still count when the day held more than those three
+      state.wearLog = [{ date: todayKey(), itemIds: first.map((i) => i.id).concat(['someBelt']), title: 'worn' }];
+      if (compatibilityReport().unworn.length !== r.unworn.length - 1) {
+        missed.push('a look worn with something extra on top was not recognised as worn');
+      }
+    }
+
+    // a piece that goes with nothing must say so, and be findable
+    const orphan = mk('Neon vest', 'top', 'teal', 1, 1);
+    state.items = [tee, jeans, shoes, orphan];
+    state.wearLog = [];
+    _baseCache = null;
+    const r3 = compatibilityReport();
+    const o = r3.ranked.find((e) => e.item.id === orphan.id);
+    if (!o) missed.push('a piece that connects to nothing was left out of the ranking entirely');
+
+    // the screen itself: every one of these is on trial and must say so
+    state.items = [tee, jumper, jeans, shoes];
+    _baseCache = null;
+    state.tab = 'stats';
+    render();
+    await new Promise((res) => setTimeout(res, 300));
+    const main = document.getElementById('main');
+    const tags = main.querySelectorAll('.test-tag').length;
+    if (!tags) missed.push('none of the trial sections is marked TEST on screen');
+    if (!main.querySelector('[data-try]')) missed.push('a look you have never worn offers no way to try it');
+    if (/NaN|undefined|Infinity/.test(main.textContent)) {
+      missed.push(`the section shows "${main.textContent.match(/.{0,26}(NaN|undefined|Infinity).{0,16}/)[0]}"`);
+    }
+    return missed;
+  });
+  for (const m of compatMisses) failures.push(`what goes with what: ${m}`);
 
   // Written down is only half of it -- it has to be read back. Saving a setting
   // that never returns looks identical to saving it correctly until the next
