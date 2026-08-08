@@ -572,12 +572,6 @@
     touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
   }
   .mark-stage img{width:100%; display:block; pointer-events:none; -webkit-user-drag:none;}
-  /* Everything outside the box is dimmed rather than the box outlined, so what
-     you are choosing reads at a glance on a small screen. */
-  .mark-box{
-    position:absolute; border:2px solid #fff; box-shadow:0 0 0 9999px rgba(10,12,18,0.55);
-    pointer-events:none; border-radius:2px;
-  }
   /* Painting shows the cut against a chequerboard rather than the photo. What
      is being judged is what has gone transparent, and against white a white
      shirt and a hole in the mask look exactly alike. The photo stays in the
@@ -596,16 +590,6 @@
   }
   .mark-stage.cutting canvas{display:block;}
   .mark-stage.cutting img{visibility:hidden;}
-  .mark-stage.cutting .mark-box{display:none;}
-  .cut-tools{display:flex; gap:6px; margin-top:8px;}
-  .cut-tool{
-    flex:1 1 0; min-width:0; background:rgba(255,255,255,0.05);
-    border:1px solid var(--line); border-radius:8px; color:rgba(239,232,216,0.72);
-    font-family:'Work Sans'; font-size:11.5px; font-weight:600; padding:7px 4px;
-    cursor:pointer; touch-action:manipulation; white-space:nowrap;
-  }
-  .cut-tool.on{background:var(--thread); border-color:var(--thread); color:#12141c;}
-  .cut-tool:disabled{opacity:0.35; cursor:default;}
   .why-txt{font-size:12.5px; line-height:1.5; color:#5a5445; flex:1;}
   @keyframes spin{to{transform:rotate(360deg);}}
   .sw-lg{width:26px;height:17px;border-radius:3px; display:block; border:1px solid rgba(0,0,0,0.25);}
@@ -1195,7 +1179,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.04';
+const APP_VERSION = '2026.09.05';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1669,6 +1653,10 @@ async function loadAll(){
        a few kilobytes each of something nothing left in the app can produce or
        check. A mask you painted by hand is a different thing and is kept. */
     if(i.aiMask){ delete i.aiMask; migrated = true; }
+    /* There was also a drag-a-box gesture, replaced by rubbing the background
+       out directly. Nothing sets a box any more and nothing reads one, so a
+       wardrobe that carries them is carrying dead weight. */
+    if(i.cutMark){ delete i.cutMark; migrated = true; }
   });
   if(migrated) saveItems();
 
@@ -2067,13 +2055,12 @@ function guessCategoryFromShape(shape){
 
    This runs only when the border-based cut has already declined, so nothing
    that works today changes. */
-function subjectFromCentre(canvas, mark){
-  /* `mark` is an optional {x0,y0,x1,y1} in 0..1 -- the box you drew around the
-     piece. A single tapped point was tried first and is not enough: it says
-     which object you mean but nothing about how far it extends, so a white
-     shoe on a white desk grew out through the furniture and took the room
-     with it. A box gives both, in the same one gesture. Inside it is the
-     piece and its immediate surroundings; outside it is definitely not. */
+function subjectFromCentre(canvas){
+  /* This used to take an optional box drawn round the piece, which narrowed
+     both the seed and the backdrop sample. The box is gone -- rubbing the
+     background out by hand does the same job without a second gesture to learn
+     -- so what is left is the reading it always fell back to: the middle of the
+     frame is the piece, the outer tenth is what it is lying on. */
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const d = ctx.getImageData(0,0,w,h).data;
@@ -2117,51 +2104,24 @@ function subjectFromCentre(canvas, mark){
   /* Where the piece is. Without a tap, the middle third -- people centre what
      they photograph, and that is the best guess available. With a tap, a small
      disc around it, which is not a guess at all. */
-  /* The box, in pixels, and the part of it the piece is most certainly in. */
-  let bx0 = 0, by0 = 0, bx1 = w, by1 = h;
-  if(mark){
-    bx0 = Math.max(0, Math.floor(mark.x0*w));  bx1 = Math.min(w, Math.ceil(mark.x1*w));
-    by0 = Math.max(0, Math.floor(mark.y0*h));  by1 = Math.min(h, Math.ceil(mark.y1*h));
-    if(bx1 - bx0 < 8 || by1 - by0 < 8) return null;
-  }
-  const inBox = function(x, y){ return x >= bx0 && x < bx1 && y >= by0 && y < by1; };
-
-  /* Where the piece certainly is: the middle third of the box you drew, or of
-     the whole frame if you drew none -- people centre what they photograph.
-     A third and not a half, because a box drawn by hand is loose and its inner
-     half still catches the bedspread either side of a shirt; sampled as
-     garment, that teaches the fill that bedspread is cloth. Using the same
-     fraction either way also means a box drawn round the whole frame changes
-     nothing, which is what drawing one round the whole frame should do. */
+  /* Where the piece certainly is: the middle third of the frame, because people
+     centre what they photograph. A third and not a half, because the inner half
+     still catches the bedspread either side of a shirt, and sampled as garment
+     that teaches the fill that bedspread is cloth. */
   const inset = function(a, b){ return Math.floor((b-a)*0.33); };
-  const cx0 = bx0 + inset(bx0,bx1), cx1 = bx1 - inset(bx0,bx1);
-  const cy0 = by0 + inset(by0,by1), cy1 = by1 - inset(by0,by1);
+  const cx0 = inset(0,w), cx1 = w - inset(0,w);
+  const cy0 = inset(0,h), cy1 = h - inset(0,h);
   const fore = model(function(emit){
     for(let y=cy0; y<cy1; y+=step) for(let x=cx0; x<cx1; x+=step) emit(y*w+x);
   }, 3);
 
   /* Whatever the thing was lying on or held over: the outer tenth of the
-     frame, plus -- if you drew a box -- everything outside it, which you have
-     just said the piece is not in.
-
-     The box is added to that sample, not substituted for it. Substituting was
-     tried and made a real photograph worse: a shirt held up fills the frame,
-     so the box people draw round it is nearly the frame, and the only pixels
-     left outside were a sliver too thin to describe a bedspread. The bedspread
-     stopped being recognised as backdrop and the fill leaked into it. Adding
-     instead means a tight box teaches us more and a loose one simply teaches
-     us nothing new. */
+     frame. */
   const band = Math.max(2, Math.round(Math.min(w,h)*0.10));
   const inBand = function(x, y){ return x < band || x >= w-band || y < band || y >= h-band; };
   const back = model(function(emit){
-    /* Each pixel once. The two regions overlap along the rim, and counting
-       that overlap twice is not harmless: the shares decide which clusters
-       survive as "surfaces", so double-weighting the rim let a box drawn just
-       inside the frame edge come out worse than one drawn round the whole
-       frame -- a box that says less producing a worse answer than a box that
-       says nothing, which is not a thing a hint should be able to do. */
     for(let y=0; y<h; y+=step) for(let x=0; x<w; x+=step){
-      if(inBand(x,y) || (mark && !inBox(x,y))) emit(y*w+x);
+      if(inBand(x,y)) emit(y*w+x);
     }
   }, 4);
 
@@ -2180,16 +2140,15 @@ function subjectFromCentre(canvas, mark){
      separate -- a white shirt on a white sweep -- and guessing would carve a
      hole in the garment.
 
-     The bar drops once you have drawn a box, because most of what it is
-     guarding against no longer applies. Measured on a real photograph: a white
-     trainer held over a cream desk came out 11.5 apart and was refused by a
-     hair, even though the box said exactly where the shoe ended. Eleven and a
-     half is not "the same colour", it is a near miss, and the growth is
-     confined to the box anyway so a near miss can only cost part of the shoe
-     rather than the room. Below six there really is nothing to go on. */
+     Twelve, with no way to lower it any more. A box used to drop this to six,
+     on the argument that the box said where the piece ended so a near miss
+     could only cost part of it. With no box there is nothing to confine the
+     growth, so a near miss would cost the room -- and refusing is cheap now:
+     it seeds the hand-cut as "all of this is the piece", which is a workable
+     place to start rubbing from. */
   let apart = 0;
   fore.forEach(function(f){ apart = Math.max(apart, near(f.lab, back)); });
-  if(apart < (mark ? 6 : 12)) return null;
+  if(apart < 12) return null;
 
   /* Classifying every pixel against the two models independently is what
      ate the right-hand side of a black shirt and the right leg of a pair of
@@ -2252,10 +2211,6 @@ function subjectFromCentre(canvas, mark){
       const x = idx % w, y = (idx-x)/w;
       const step = function(n){
         if(n < 0 || n >= w*h || got[n]) return;
-        if(mark){
-          const nx = n % w, ny = (n-nx)/w;
-          if(!inBox(nx, ny)) return;   /* you drew the edge; respect it */
-        }
         const c = labAt(n);
         if(labDist(c, from) > STEP) return;         /* a cliff: stop here */
         const db = near(c, back);
@@ -2332,10 +2287,7 @@ function subjectFromCentre(canvas, mark){
     if(touches(0,y)) edgeHits++;
     if(touches(w-1,y)) edgeHits++;
   }
-  /* Loosened once you have pointed at the piece: a shirt held up can run to
-     the frame edge, and the island containing your tap is by definition the
-     thing you meant. */
-  if(!mark && edgeHits/edgeTotal > 0.22) return null;
+  if(edgeHits/edgeTotal > 0.22) return null;
 
   /* How much of its own bounding box the island fills. A garment lying down
      is a solid shape and fills most of it; a fragment of shoe, a band of desk
@@ -2349,11 +2301,7 @@ function subjectFromCentre(canvas, mark){
      hand against a room does not, and is left alone rather than guessed at,
      because naming a garment after a desk is worse than not naming it. */
   const fillRatio = best.area / Math.max(1, (best.x1-best.x0+1)*(best.y1-best.y0+1));
-  /* The compactness bar exists to answer "is this really the piece, or a strip
-     of desk?". A tap answers that outright, so it is not asked again -- and a
-     shoe held in a hand, which fails this bar every time, becomes workable the
-     moment you point at it. */
-  if(!mark && fillRatio < 0.48) return null;
+  if(fillRatio < 0.48) return null;
 
   /* Re-walk the winning island to mark it, since the labelling above cannot
      tell the islands apart afterwards. */
@@ -5431,53 +5379,29 @@ function openDetail(id){
     +   '</div>'
     +   '<button id="favBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:'+(item.favourite?'var(--thread)':'rgba(239,232,216,0.3)')+';padding:2px;">♥</button>'
     + '</div>'
-    /* Marking the piece. Colour alone cannot separate a garment from a
-       background of the same colour, from another object of the same colour
-       in shot, or from whatever it is touching -- and every bad cut so far
-       has been one of those three.
+    /* Fixing the cut. Colour alone cannot separate a garment from a background
+       of the same colour, from another object of the same colour in shot, or
+       from whatever it is touching -- and every bad cut so far has been one of
+       those three. None of them is a tuning problem: there is no edge in the
+       photograph to find.
 
-       A single tapped point was the first attempt and made things worse: on a
-       real photograph of a white trainer held over a cream desk it grew out
-       through the furniture and returned the room. A point says which object
-       you mean but nothing about where it ends. A box says both, in the same
-       one gesture, and measured on the same photographs the tighter the box
-       the better the cut -- with a box round the whole frame coming out
-       exactly as the automatic reading does. */
-    /* And when even a box is not enough, the brushes finish it by hand. The two
-       are one panel rather than two because they are the same job at different
-       resolutions: the box says roughly where the piece is in one gesture, the
-       brushes settle the pixels the arithmetic still got wrong. */
+       This went through a tapped point, then a dragged box, then a segmentation
+       model, then a box and two brushes and a width picker. Every one of those
+       was another thing to understand before you could fix a picture. So it is
+       one gesture now: drag over what is not the piece. If it goes wrong, reset
+       and the app's own reading comes back. */
     + '<div class="mark-panel">'
     +   '<div class="mark-head">'
     +     '<span class="mark-title">'
-    +       (item.handMask ? 'Cut by hand' : item.cutMark ? 'Marked' : 'Cut-out not right?')
+    +       (item.handMask ? 'Cut by hand' : 'Cut-out not right?')
     +     '</span>'
-    +     ((item.cutMark || item.handMask)
-        ? '<button class="mark-clear" id="clearMarkBtn">start over</button>' : '')
+    +     (item.handMask ? '<button class="mark-clear" id="clearMarkBtn">reset</button>' : '')
     +   '</div>'
-    +   '<div class="mark-sub" id="markHint">'+escapeHtml(CUT_TOOLS[_cutTool].hint)+'</div>'
+    +   '<div class="mark-sub">Drag over anything that is not the piece &mdash; the desk, your hand, a shadow.</div>'
     +   '<div class="mark-stage" id="markStage">'
     +     '<img src="'+imgSrc(item)+'" alt="">'
     +     '<canvas id="markCanvas"></canvas>'
-    +     (item.cutMark
-        ? '<span class="mark-box" id="markBox" style="left:'+(item.cutMark.x0*100)+'%;top:'+(item.cutMark.y0*100)+'%'
-          + ';width:'+((item.cutMark.x1-item.cutMark.x0)*100)+'%;height:'+((item.cutMark.y1-item.cutMark.y0)*100)+'%"></span>'
-        : '<span class="mark-box" id="markBox" style="display:none"></span>')
     +   '</div>'
-    +   '<div class="cut-tools">'
-    +     ['box','erase','restore'].map(function(t){
-            return '<button class="cut-tool'+(_cutTool===t?' on':'')+'" data-cut-tool="'+t+'">'
-                 + CUT_TOOLS[t].label + '</button>';
-          }).join('')
-    +   '</div>'
-    /* The second row only means anything with a brush in hand, so it is only
-       there then -- a disabled row of buttons is noise on a screen this size. */
-    +   (_cutTool === 'box' ? '' :
-          '<div class="cut-tools">'
-        +   '<button class="cut-tool'+(_cutSize===CUT_SIZES.fine?' on':'')+'" data-cut-size="fine">Fine</button>'
-        +   '<button class="cut-tool'+(_cutSize===CUT_SIZES.broad?' on':'')+'" data-cut-size="broad">Broad</button>'
-        +   '<button class="cut-tool" id="cutUndoBtn">Undo</button>'
-        + '</div>')
     /* The other answer to a bad cut, for when marking it is not worth the
        trouble or the photograph simply cannot be read: leave this one alone.
        Beside the box rather than in Settings, because both are answers to the
@@ -5520,18 +5444,16 @@ function openDetail(id){
     await saveItems();
     openDetail(id);
   };
-  /* One drag is the whole interaction, whichever tool is in hand. Pointer
-     events rather than mouse or touch ones: the same handlers then cover
-     finger, stylus and mouse, and capture means a drag that runs off the photo
-     still finishes here instead of being lost to whatever it passed over. */
+  /* One drag is the whole interaction. Pointer events rather than mouse or
+     touch ones: the same handlers then cover finger, stylus and mouse, and
+     capture means a drag that runs off the photo still finishes here instead of
+     being lost to whatever it passed over. */
   const stage = document.getElementById('markStage');
-  const boxEl = document.getElementById('markBox');
   const cutCv = document.getElementById('markCanvas');
-  if(stage && boxEl){
-    /* Null rather than a fraction of nothing. The stage has no height until
-       the photo has loaded into it, and dividing by that height gives NaN --
-       which sails through a "is this box big enough" test, gets stored, and
-       leaves the piece with a mark that can never be read. */
+  if(stage && cutCv){
+    /* Null rather than a fraction of nothing. The stage has no height until the
+       photo has loaded into it, and dividing by that height gives NaN, which
+       would land a stroke nowhere and quietly corrupt the mask. */
     const at = function(e){
       const r = stage.getBoundingClientRect();
       if(r.width < 1 || r.height < 1) return null;
@@ -5541,78 +5463,23 @@ function openDetail(id){
       };
     };
 
-    /* ---- the box ---- */
-    let from = null;
-    const show = function(a, b){
-      boxEl.style.display = '';
-      boxEl.style.left   = (Math.min(a.x,b.x)*100) + '%';
-      boxEl.style.top    = (Math.min(a.y,b.y)*100) + '%';
-      boxEl.style.width  = (Math.abs(b.x-a.x)*100) + '%';
-      boxEl.style.height = (Math.abs(b.y-a.y)*100) + '%';
-    };
-    const boxUp = async function(e){
-      const a = from, b = at(e);
-      from = null;
-      if(!a || !b) return;
-      const box = {
-        x0: +Math.min(a.x,b.x).toFixed(4), y0: +Math.min(a.y,b.y).toFixed(4),
-        x1: +Math.max(a.x,b.x).toFixed(4), y1: +Math.max(a.y,b.y).toFixed(4)
-      };
-      /* A stray tap is not a box. Snapping back to whatever was stored keeps
-         a mis-touch from silently throwing away a good mark. Written so that
-         anything not a real measurement fails it rather than passes it. */
-      if(!(box.x1 - box.x0 >= 0.06) || !(box.y1 - box.y0 >= 0.06)){
-        openDetail(id);
-        return;
-      }
-      item.cutMark = box;
-      /* A box is a coarser answer than a painted mask, so it does not get to
-         quietly undo one. Whoever wants to start again has the button for it. */
-      delete item.handMask;
-      _cut = null;
-      _layCache.delete(item.id);
-      /* Only when the colour is still the app's own guess. A colour you set by
-         hand is an answer, and drawing a box is not a request to overrule it. */
-      let recoloured = null;
-      if(item.colorAuto !== false){
-        const colors = await recolourFromMark(item);
-        if(colors && colors[0] && colors[0].name !== item.color){
-          recoloured = colors[0].name;
-          item.color = recoloured;
-        }
-      }
-      await saveItems();
-      /* Re-render rather than patch the sheet, so the box, the heading and
-         the lay-out all follow from the one stored fact instead of three
-         places agreeing by hand. */
-      openDetail(id);
-      render();
-      toast(recoloured ? 'Reading it from inside the box — ' + recoloured
-                       : 'Reading the piece from inside the box');
-    };
-
-    /* ---- the brushes ---- */
+    /* Painted straight onto the mask a segment at a time. There is no undo to
+       stay consistent with -- reset is the way back -- so the mask itself is the
+       only record, and there is nothing to replay it from. */
     const paintTo = function(p){
-      if(!_cut || !_cut.live) return;
-      _cut.live.pts.push(p);
-      /* Replayed from the seed on every move rather than the last segment being
-         added on top. Slower, and it guarantees that what you are looking at is
-         exactly what undo will reproduce -- with destination-out, overlapping
-         segments erode an antialiased edge a second time, so the incremental
-         picture and the replayed one would slowly drift apart. */
-      replayStrokes(_cut);
+      if(!_cut || !_cut.at) return;
+      rubOut(_cut.mask.getContext('2d'), _cut.at, p);
+      _cut.at = p;
       drawCutPreview(_cut);
     };
     const paintUp = function(){
-      if(!_cut || !_cut.live) return;
-      _cut.live = null;
+      if(!_cut || !_cut.at) return;
+      _cut.at = null;
       /* Written to the piece now rather than on the settle, so the stored mask
          is never behind what is on screen even if something interrupts. */
       item.handMask = alphaMaskToPng(_cut.mask);
       _layCache.delete(item.id);
       scheduleCutSettle(item);
-      const undo = document.getElementById('cutUndoBtn');
-      if(undo) undo.disabled = false;
     };
 
     stage.onpointerdown = function(e){
@@ -5623,83 +5490,30 @@ function openDetail(id){
          handler to an exception. */
       try{ stage.setPointerCapture(e.pointerId); }catch(err){}
       e.preventDefault();
-      if(_cutTool === 'box'){
-        from = p;
-        show(p, p);
-        return;
-      }
-      /* A brush before the session is ready. Ignored rather than queued: the
-         seed takes a moment on a large photograph, and a stroke replayed onto
-         a mask that arrived afterwards lands in the wrong place. */
+      /* A stroke before the session is ready. Ignored rather than queued: the
+         seed takes a moment on a large photograph, and a stroke painted onto a
+         mask that arrived afterwards lands in the wrong place. */
       if(!_cut || _cut.id !== item.id) return;
-      _cut.live = {tool:_cutTool, size:_cutSize, pts:[p]};
-      _cut.strokes.push(_cut.live);
-      replayStrokes(_cut);
+      _cut.at = p;
+      rubOut(_cut.mask.getContext('2d'), p, p);
       drawCutPreview(_cut);
     };
     stage.onpointermove = function(e){
-      if(_cutTool === 'box'){
-        const p = from && at(e);
-        if(p) show(from, p);
-        return;
-      }
-      if(!_cut || !_cut.live) return;
+      if(!_cut || !_cut.at) return;
       const p = at(e);
       if(p) paintTo(p);
     };
     stage.onpointerup = function(e){
-      if(_cutTool === 'box') return boxUp(e);
       const p = at(e);
       if(p) paintTo(p);
       paintUp();
     };
-    stage.onpointercancel = function(){
-      if(_cutTool === 'box'){ from = null; openDetail(id); return; }
-      paintUp();
-    };
-  }
+    stage.onpointercancel = function(){ paintUp(); };
 
-  /* Switching tool redraws the sheet, because the hint, the width row and what
-     the stage is showing all follow from it. The strokes live on _cut rather
-     than in the DOM, so redrawing does not cost you any of them. */
-  Array.prototype.forEach.call(document.querySelectorAll('[data-cut-tool]'), function(b){
-    b.onclick = function(){
-      const t = b.getAttribute('data-cut-tool');
-      if(t === _cutTool) return;
-      _cutTool = t;
-      openDetail(id);
-    };
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('[data-cut-size]'), function(b){
-    b.onclick = function(){
-      _cutSize = CUT_SIZES[b.getAttribute('data-cut-size')];
-      openDetail(id);
-    };
-  });
-
-  const undoBtn = document.getElementById('cutUndoBtn');
-  if(undoBtn){
-    undoBtn.disabled = !(_cut && _cut.id === item.id && _cut.strokes.length);
-    undoBtn.onclick = function(){
-      if(!_cut || _cut.id !== item.id || !_cut.strokes.length) return;
-      _cut.strokes.pop();
-      replayStrokes(_cut);
-      drawCutPreview(_cut);
-      /* No strokes left means the mask is the app's own answer again, and
-         storing a copy of that would only be one more thing to keep in step. */
-      if(_cut.strokes.length) item.handMask = alphaMaskToPng(_cut.mask);
-      else delete item.handMask;
-      _layCache.delete(item.id);
-      scheduleCutSettle(item);
-      undoBtn.disabled = !_cut.strokes.length;
-    };
-  }
-
-  /* Cutting mode is entered after the sheet exists, because it needs the canvas
-     that the sheet just built. Nothing is awaited by the caller: the photo is
-     already on screen underneath, so the preview arriving a frame later reads
-     as it appearing rather than as the panel being empty. */
-  if(_cutTool !== 'box' && stage && cutCv){
+    /* Entered after the sheet exists, because it needs the canvas the sheet just
+       built. Not awaited: the photo is already on screen underneath, so the
+       preview arriving a frame later reads as it appearing rather than as the
+       panel sitting empty. */
     enterCutting(item, stage, cutCv);
   }
 
@@ -5796,7 +5610,6 @@ function openDetail(id){
 function leaveDetail(){
   settleHandCut();
   _cut = null;
-  _cutTool = 'box';
   detailOverlay.classList.remove('open');
 }
 detailOverlay.onclick = function(e){ if(e.target===detailOverlay) leaveDetail(); };
@@ -5963,41 +5776,6 @@ const _layCache = new Map();
    needs more resolution than that, and scaling one back up smooths its border,
    which is what you want anyway. */
 const MASK_SIDE = 320;
-
-/* The silhouette, described the way the category guess wants it: how tall
-   against how wide, how much of the frame, where it sits, and how much of its
-   own bounding box it fills. Measured on the largest island rather than on
-   every kept pixel, so a speck of something else in shot cannot stretch the
-   bounding box and make a shoe look like a pair of trousers. */
-function shapeFromMask(mask, w, h){
-  const seen = new Uint8Array(w*h);
-  let best = null;
-  for(let s=0; s<w*h; s++){
-    if(mask[s] || seen[s]) continue;
-    let area=0, x0=w, y0=h, x1=-1, y1=-1;
-    const stack = [s];
-    seen[s] = 1;
-    while(stack.length){
-      const idx = stack.pop();
-      const x = idx % w, y = (idx-x)/w;
-      area++;
-      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
-      if(x>0   && !mask[idx-1] && !seen[idx-1]){ seen[idx-1]=1; stack.push(idx-1); }
-      if(x<w-1 && !mask[idx+1] && !seen[idx+1]){ seen[idx+1]=1; stack.push(idx+1); }
-      if(y>0   && !mask[idx-w] && !seen[idx-w]){ seen[idx-w]=1; stack.push(idx-w); }
-      if(y<h-1 && !mask[idx+w] && !seen[idx+w]){ seen[idx+w]=1; stack.push(idx+w); }
-    }
-    if(!best || area > best.area) best = {area:area, x0:x0, y0:y0, x1:x1, y1:y1};
-  }
-  if(!best) return null;
-  const bw = best.x1-best.x0+1, bh = best.y1-best.y0+1;
-  return {
-    area: best.area/(w*h),
-    aspect: bh / Math.max(1, bw),
-    midY: ((best.y0+best.y1)/2) / h,
-    fill: best.area / Math.max(1, bw*bh)
-  };
-}
 
 /* A mask, small enough to keep. Stored as a PNG at the model's own 320 square
    rather than as raw bits: a silhouette is one big shape, which PNG compresses
@@ -6231,12 +6009,10 @@ function addStickerOutline(canvas, px){
    really is one surface that is the more exact of the two; the middle after,
    for the photographs people actually take -- on a bed, on a rug, on a desk.
    One function so the app and its tests cannot drift apart on which is which. */
-function liftForLayout(canvas, mark){
-  /* A tap outranks the automatic reading: it was given precisely because the
-     automatic one was wrong. */
-  if(!mark && isolateForLayout(canvas)) return true;
-  const mid = subjectFromCentre(canvas, mark);
-  if(!mid) return mark ? isolateForLayout(canvas) : false;
+function liftForLayout(canvas){
+  if(isolateForLayout(canvas)) return true;
+  const mid = subjectFromCentre(canvas);
+  if(!mid) return false;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
   for(let i=0; i<mid.mask.length; i++){
@@ -6310,7 +6086,7 @@ async function handCutSeed(item){
   const img = await loadImageFromDataUrl(item.image);
   const c = drawToCanvas(img, 420);
   let lifted = false;
-  try{ lifted = !!liftForLayout(c, item.cutMark); }
+  try{ lifted = !!liftForLayout(c); }
   catch(e){ console.warn('the automatic cut failed; starting from the whole frame', e); }
 
   const cv = document.createElement('canvas');
@@ -6360,53 +6136,38 @@ function bgMaskFromAlpha(cv, w, h){
   return (kept/(w*h) < 0.005) ? null : out;
 }
 
-/* Which tool the stage is in. Module-level rather than per-item, because it is
-   how you are working rather than anything true about the garment, and because
-   it has to survive the sheet being redrawn. */
-let _cutTool = 'box';
-/* Stroke width as a fraction of the square. Broad by default: the common job is
-   sweeping a desk out of the background, and a fine brush makes that tedious. */
-const CUT_SIZES = {fine:0.035, broad:0.14};
-let _cutSize = CUT_SIZES.broad;
+/* One width, because there is one tool. Broad enough that sweeping a desk out of
+   the background is a couple of passes rather than a chore, and a fraction of the
+   square rather than pixels so it means the same thing on any photograph. */
+const CUT_BRUSH = 0.12;
 
-const CUT_TOOLS = {
-  box:     {label:'Box',        hint:'Drag a box round the piece. The tighter it is, the better the cut.'},
-  erase:   {label:'Rub out',    hint:'Drag over anything that is not the piece — the desk, your hand, a shadow.'},
-  restore: {label:'Bring back', hint:'Drag over any part of the piece that went missing.'}
-};
-
-/* The brush session, alive only while a sheet is open. Strokes are kept as
-   strokes rather than as pictures of the mask, which is what makes undo a pop
-   and a replay instead of a stack of 400 KB snapshots. */
+/* The painting session, alive only while a sheet is open. */
 let _cut = null;
 
-function strokeOnto(x, s){
-  const r = s.size * MASK_SIDE;
-  /* Rubbing out is destination-out: the stroke's own colour is irrelevant, only
-     where it lands. Bringing back paints white, which is opaque, which is kept. */
-  x.globalCompositeOperation = (s.tool === 'erase') ? 'destination-out' : 'source-over';
+/* Rub a segment of stroke out of the mask. destination-out means the colour is
+   irrelevant and only where it lands matters; round caps and joins are what make
+   a dragged sequence of these read as one continuous stroke.
+
+   Painted straight onto the mask rather than accumulated as a list of strokes to
+   replay. That was worth doing when there was an undo to stay consistent with;
+   with reset as the only way back, the mask is the record. */
+function rubOut(x, a, b){
+  const r = CUT_BRUSH * MASK_SIDE;
+  x.globalCompositeOperation = 'destination-out';
   x.strokeStyle = x.fillStyle = '#fff';
   x.lineWidth = r;
   x.lineCap = x.lineJoin = 'round';
-  if(s.pts.length < 2){
+  if(a.x === b.x && a.y === b.y){
     x.beginPath();
-    x.arc(s.pts[0].x*MASK_SIDE, s.pts[0].y*MASK_SIDE, r/2, 0, Math.PI*2);
+    x.arc(a.x*MASK_SIDE, a.y*MASK_SIDE, r/2, 0, Math.PI*2);
     x.fill();
   }else{
     x.beginPath();
-    x.moveTo(s.pts[0].x*MASK_SIDE, s.pts[0].y*MASK_SIDE);
-    for(let i = 1; i < s.pts.length; i++) x.lineTo(s.pts[i].x*MASK_SIDE, s.pts[i].y*MASK_SIDE);
+    x.moveTo(a.x*MASK_SIDE, a.y*MASK_SIDE);
+    x.lineTo(b.x*MASK_SIDE, b.y*MASK_SIDE);
     x.stroke();
   }
   x.globalCompositeOperation = 'source-over';
-}
-
-function replayStrokes(c){
-  const x = c.mask.getContext('2d');
-  x.globalCompositeOperation = 'source-over';
-  x.clearRect(0, 0, MASK_SIDE, MASK_SIDE);
-  x.drawImage(c.seed, 0, 0);
-  c.strokes.forEach(function(s){ strokeOnto(x, s); });
 }
 
 /* The photograph wearing the mask's alpha, entirely through the compositor --
@@ -6424,8 +6185,8 @@ function drawCutPreview(c){
 
 /* Opens a brush session on a piece, or picks the open one back up. The sheet is
    rebuilt whenever a tool or a width changes, so this runs often and must not
-   throw away strokes when it does -- hence the check on the id rather than a
-   fresh session every time. */
+   throw away what has been painted when it does -- hence the check on the id
+   rather than a fresh session every time. */
 async function enterCutting(item, stage, cv){
   if(_cut && _cut.id === item.id){
     /* The canvas element is new after every redraw, so the session is pointed
@@ -6440,18 +6201,17 @@ async function enterCutting(item, stage, cv){
   try{
     const img = await loadImageFromDataUrl(item.image);
     const photo = drawToCanvas(img, 420);
-    /* A mask already painted becomes the seed, so a session begun later starts
-       from where the last one finished rather than from the app's guess. The
-       cost is that undo does not reach back past the sheet being closed, which
-       is the ordinary meaning of undo. */
-    const seed = item.handMask ? await pngToAlphaMask(item.handMask)
-                               : await handCutSeed(item);
+    /* A mask already painted is where this picks up, so reopening a piece
+       continues the last session rather than starting from the app's guess and
+       silently throwing away what was done. */
     const mask = document.createElement('canvas');
     mask.width = mask.height = MASK_SIDE;
-    _cut = {id:item.id, view:cv, photo:photo, seed:seed, mask:mask, strokes:[], live:null};
+    const seed = item.handMask ? await pngToAlphaMask(item.handMask)
+                               : await handCutSeed(item);
+    mask.getContext('2d').drawImage(seed, 0, 0);
+    _cut = {id:item.id, view:cv, photo:photo, mask:mask, at:null};
     cv.width = photo.width;
     cv.height = photo.height;
-    replayStrokes(_cut);
     /* Only once there is something to show. Adding the class earlier hides the
        photograph and leaves a chequerboard sitting there while this runs. */
     stage.classList.add('cutting');
@@ -6460,8 +6220,8 @@ async function enterCutting(item, stage, cv){
   }catch(e){
     console.warn('could not open the photo for painting', e);
     _cut = null;
-    /* Left in box mode with the photograph showing rather than in a painting
-       mode that cannot paint. */
+    /* The photograph is left showing rather than a chequerboard you cannot
+       paint on. */
     stage.classList.remove('cutting');
     toast('That photo could not be opened for painting');
     return null;
@@ -6510,7 +6270,6 @@ async function settleHandCut(){
    session with them, so the next brush stroke starts from a fresh reading rather
    than from the mask that was just abandoned. */
 async function startCutOver(item){
-  delete item.cutMark;
   delete item.handMask;
   _cut = null;
   _cutPending = null;
@@ -6530,17 +6289,15 @@ function syncMarkPanel(item){
   if(!head) return;
   const title = head.querySelector('.mark-title');
   if(title){
-    title.textContent = item.handMask ? 'Cut by hand'
-                      : item.cutMark  ? 'Marked'
-                                      : 'Cut-out not right?';
+    title.textContent = item.handMask ? 'Cut by hand' : 'Cut-out not right?';
   }
-  const want = !!(item.handMask || item.cutMark);
+  const want = !!item.handMask;
   let btn = head.querySelector('.mark-clear');
   if(want && !btn){
     btn = document.createElement('button');
     btn.className = 'mark-clear';
     btn.id = 'clearMarkBtn';
-    btn.textContent = 'start over';
+    btn.textContent = 'reset';
     btn.onclick = function(){ startCutOver(item); };
     head.appendChild(btn);
   }else if(!want && btn){
@@ -6613,7 +6370,7 @@ async function enhanceLayImages(){
 
       /* Nothing painted, or what was stored could not be read. Measure the
          photograph, narrowed down by the box if one was drawn. */
-      if(!cut) cut = liftForLayout(c, item.cutMark);
+      if(!cut) cut = liftForLayout(c);
 
       const url = cut ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png') : null;
       _layCache.set(id, url);
@@ -6622,35 +6379,6 @@ async function enhanceLayImages(){
       _layCache.set(id, null);
       settle(null);
     }
-  }
-}
-
-/* A wrong cut and a wrong colour are usually the same mistake. When the piece
-   could not be told from the room, the colours were read off the room too --
-   which is how a black shirt on a pale bed came back sand. So the box does not
-   only fix the lay-out: it re-reads the colour from inside itself.
-
-   The category is deliberately left alone. It is confirmed by hand before an
-   item can be saved, so it is already right, and quietly changing an answer
-   someone gave is worse than leaving a stale one.
-
-   Returns the new colour list, or null if nothing better could be read. */
-async function recolourFromMark(item){
-  if(!item || !item.image || !item.cutMark) return null;
-  try{
-    const img = await loadImageFromDataUrl(item.image);
-    const lit = subjectFromCentre(drawToCanvas(img, 420), item.cutMark);
-    if(!lit || !lit.mask) return null;
-    const measure = drawToCanvas(img, 420);
-    try{
-      const gains = estimateIlluminant(measure);
-      if(gains) applyGains(measure, gains);
-    }catch(e){ console.warn('white balance failed', e); }
-    const colors = detectColors(measure, lit.mask);
-    return (colors && colors.length) ? colors : null;
-  }catch(e){
-    console.warn('re-reading colour from the box failed', e);
-    return null;
   }
 }
 
