@@ -514,7 +514,7 @@ try {
 
     const done = () => {
       state.items = kept;
-      _cut = null;
+      _cut = null; _cutMode = 'erase';
       document.getElementById('detailOverlay').classList.remove('open');
       return [...new Set(missed)];
     };
@@ -525,19 +525,22 @@ try {
     for (let i = 0; i < 100 && stage0.getBoundingClientRect().height < 1; i++) await wait(50);
     if (stage0.getBoundingClientRect().height < 1) return done(['the photo never appeared to paint on']);
 
-    // There is one gesture and no tool to pick, so the stage must already be
-    // showing the cut when the sheet opens. A panel that needs a button pressed
-    // before it does anything is the thing this replaced.
+    // The stage must already be showing the cut when the sheet opens. A panel
+    // that needs a button pressed before it does anything is the thing this
+    // replaced.
     await wait(500);
     if (!document.getElementById('markStage').classList.contains('cutting')) {
       missed.push('the sheet opened without showing the cut, so there is nothing to correct');
     }
     if (!_cut || _cut.id !== it.id) return done(['opening the sheet opened no painting session']);
 
-    // Only two controls may exist. This is the whole point of the change, and
-    // it is the kind of thing that quietly grows back.
+    // Two directions for the brush and nothing else. The width picker and the
+    // undo are staying gone, and that is the kind of thing that quietly grows
+    // back, so it is asserted rather than trusted.
+    const modes = document.querySelectorAll('.mark-panel [data-cut-mode]');
+    if (modes.length !== 2) missed.push(`the panel offers ${modes.length} brush directions, not 2`);
     const strays = document.querySelectorAll('.mark-panel [data-cut-tool], .mark-panel [data-cut-size], .mark-panel #cutUndoBtn');
-    if (strays.length) missed.push(`the panel grew ${strays.length} tool button(s) back`);
+    if (strays.length) missed.push(`the width picker or undo grew back (${strays.length} button(s))`);
 
     const at = (fx, fy) => {
       const r = document.getElementById('markStage').getBoundingClientRect();
@@ -594,6 +597,25 @@ try {
         if (aa(0.5, 0.5) > 128) missed.push('restored from storage, the rubbed-out stroke came back');
         if (aa(0.5, 0.30) < 128) missed.push('restored from storage, the untouched garment was gone');
       }
+    }
+
+    // Bringing back, over the very pixels just rubbed out. This is the whole
+    // reason the second button exists: without it one careless sweep across a
+    // hem costs the entire mask, because reset is the only other way back.
+    const bringBack = document.querySelector('[data-cut-mode="restore"]');
+    if (!bringBack) missed.push('there is no way to bring anything back');
+    else {
+      bringBack.click();
+      await wait(500);
+      await paint(0.40, 0.5, 0.60, 0.5);
+      if (alphaAt(0.5, 0.5) < 128) missed.push('bringing back over what was rubbed out did not return it');
+      // and it must not be a reset in disguise -- the backdrop stays gone
+      if (alphaAt(0.04, 0.04) > 128) missed.push('bringing back returned the backdrop as well');
+      // back to rubbing out for the checks below
+      document.querySelector('[data-cut-mode="erase"]').click();
+      await wait(400);
+      await paint(0.40, 0.5, 0.60, 0.5);
+      if (alphaAt(0.5, 0.5) > 128) missed.push('switching back to rub out left the brush bringing back');
     }
 
     // The panel has to admit what it now holds. The sheet is not rebuilt after a
@@ -669,7 +691,7 @@ try {
     state.items = [it];
     const done = () => {
       state.items = kept;
-      _cut = null;
+      _cut = null; _cutMode = 'erase';
       document.getElementById('detailOverlay').classList.remove('open');
       return [...new Set(missed)];
     };
