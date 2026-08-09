@@ -521,15 +521,6 @@ third genuinely having silver-ish pixels, and the app naming the pixels it has.
 Skipping the white-balance correction moves that 147 to 144, so the correction
 is not the culprit either.
 
-The earlier version of this file reported the model taking the colour from
-168/180 to 180/180. That figure does not reproduce here — a *perfect* mask
-reaches 147 on this sweep — so it is not restated as fact. The likeliest
-explanation is that the sweep it came from lit only the backdrop and pasted an
-unlit garment on top, which leaves the mask as almost the only thing that can go
-wrong; lighting the whole scene, as a lamp does, makes exposure the larger error
-and no mask can help with that. Measured that way here, the same comparison is
-165 → 168.
-
 So the case for cutting by hand is not an accuracy table. It is that on the third
 of photographs where the arithmetic fails, there is now an answer that cannot be
 wrong, because you are looking at it while you give it — and it costs nothing to
@@ -542,6 +533,69 @@ worker no longer keeps that cache, and its `activate` handler deletes any cache
 it does not recognise — so the first launch of this version frees the space on
 its own. The masks the model had worked out are dropped on load for the same
 reason: nothing left in the app can produce or check them.
+
+### The 180/180 that does not reproduce
+
+An earlier version of this file reported the model taking the colour from
+168/180 to 180/180. It does not reproduce. A *perfect* mask — the garment's own
+silhouette, which no model can beat — reaches **147** on the sweep above, and
+**168** on the gentler variant that lights only the backdrop. Neither lands
+anywhere near 180.
+
+Two mechanisms were tested for why a real mask might beat a perfect one, because
+both would have been worth shipping:
+
+**Could the boundary be the problem?** A perfect silhouette includes its own
+antialiased edge, where every pixel is part garment and part surface. Pulling the
+mask inward should drop them.
+
+| mask pulled in by | correct |
+|---|---|
+| 0 px | 147 / 180 |
+| 2, 4, 7, 10 px | 147 / 180 |
+
+Identical at every radius. The instrument was checked rather than trusted — the
+kept area really does fall, 25 688 → 17 154 pixels across that range — so this is
+a real null. The colour reader samples on a grid about five pixels apart, and a
+boundary a few pixels wide simply does not contribute enough samples to matter.
+
+**Could the shading be the problem?** u2net produces a saliency map, which tends
+to favour the well-lit core of an object — and shade on a pale garment is exactly
+what drags a white shirt to "silver". So: read the colour off the brightest
+quarter of the garment instead of all of it. On the neutral sweep that gains ten
+scenes, 147 → 157, entirely in the pale neutrals and with nothing lost at the
+dark end.
+
+Then the same idea against every colour the app knows, on matte fabric and on a
+fabric with a highlight — because the brightest part of a *coloured* garment is
+its highlight, and highlights are washed out:
+
+| | whole garment | brightest 25% |
+|---|---|---|
+| matte | 245 / 264 | **252 / 264** |
+| with a sheen | **183 / 264** | 163 / 264 |
+
+It helps matte cloth and costs more than that on anything shiny — beige reads
+cream, tan reads beige, charcoal reads grey. Net across both, 428 → 415. **So it
+is not shipped**, and it is recorded here so the idea does not get had twice.
+
+(The first sheen fixture was too strong to be worth anything: a highlight at 0.72
+alpha washed the colour out so completely that reading the *whole* garment scored
+19/264, which cannot tell two settings apart. The numbers above use 0.30.)
+
+**So what did happen?** With both mechanical explanations ruled out, the likeliest
+answer is that the original number was mis-measured. That is not a guess about
+someone's carelessness — this file's own author reproduced exactly such an error
+while writing the section above, by handing the colour reader a mask in the wrong
+convention: a black-and-white PNG whose *alpha* is 255 throughout says "none of
+this is background", the reader takes the colour off the whole frame, and the
+score swings from 147/180 to 21/180 with nothing raising an error. A silent
+convention mismatch of that kind moves this number further than any real change
+to the code does, in either direction.
+
+The original script is gone, so this cannot be settled. What can be said is that
+the claim is unsupported, the two ways it might have been true have been tested
+and were not, and the way it might have been false is demonstrable.
 
 ### Turning the cut off
 
