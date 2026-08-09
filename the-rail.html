@@ -1187,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.06';
+const APP_VERSION = '2026.09.07';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1523,6 +1523,7 @@ let state = {
      a guess, and when it guesses wrong on a piece there has to be a way to
      see the photograph instead of arguing with it. */
   layCut: true,
+  layEven: true,
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1622,6 +1623,7 @@ async function loadAll(){
   /* Explicitly against false: absent means a wardrobe saved before this
      existed, which should get the cut-outs rather than be silently opted out. */
   if(prefs.layCut === false) state.layCut = false;
+  if(prefs.layEven === false) state.layEven = false;
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now.
@@ -1686,7 +1688,8 @@ function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
-    temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut
+    temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut,
+    layEven: state.layEven
   });
 }
 
@@ -4396,6 +4399,18 @@ function renderOutfitResult(outfit, saved, savedIdx){
     +   '<button class="switch '+(state.layCut?'on':'')+'" data-lay-cut '
     +     'aria-label="Cut pieces out of their photos"></button>'
     + '</div>'
+    /* Only while there is a cut-out to even out. With the cut off you are
+       looking at the photographs as taken, and offering to relight them there
+       would be offering something that does nothing. */
+    + (state.layCut
+        ? '<div class="cut-row">'
+        +   '<span class="cut-txt">'
+        +     (state.layEven ? 'Shading evened out' : 'Shading left as photographed')
+        +   '</span>'
+        +   '<button class="switch '+(state.layEven?'on':'')+'" data-lay-even '
+        +     'aria-label="Even out shading across each piece"></button>'
+        + '</div>'
+        : '')
     + incompleteNote(outfit)
     + (!saved ? '<div class="swap-tip">Tap a piece to swap it for another</div>' : '')
     + '<div class="outfit-reasoning">'+escapeHtml(outfit.reasoning||'')+'</div>'
@@ -6012,6 +6027,131 @@ function isolateForLayout(canvas){
    it rather than away; so the refusals stay exactly as strict as they were. */
 const LAY_OUTLINE = 5;      /* px at the 420 the copy is built at */
 
+/* ---------- evening the light out ----------
+   A piece photographed with a window on one side comes out half lit and half in
+   shade, and the lay-out then shows you half a garment. Nothing is wrong with
+   the cut; the photograph really is like that. But the point of the view is to
+   see the thing, so the picture is worth flattening.
+
+   How: estimate how bright the light was across the garment at a coarse grid,
+   then divide it out -- the flat-field correction a scanner does. Luminance
+   only, applied to all three channels together, so a colour is dimmed or lifted
+   but never shifted.
+
+   The honest difficulty is that shading and a two-tone garment are the same
+   signal. A shirt that is genuinely black on one side and white on the other
+   looks exactly like a white shirt with a shadow across it, and no amount of
+   cleverness here can tell them apart -- a person needs to know what a shirt
+   is. So the correction is capped hard. At the cap a real shadow is most of the
+   way gone and a colour-blocked garment is still plainly two colours, which is
+   the trade being made on purpose.
+
+   Display only. The stored photograph is never touched -- as everywhere else
+   here, being wrong should cost a plain-looking tile and nothing more. */
+/* 1.4, chosen by measuring rather than by taste. Across the garment, brightness
+   spread before and after, on a shadow and on a harsher one, against a genuinely
+   two-tone shirt that the correction must not merge:
+
+                  as taken   1.25   1.4   1.55
+     a shadow           61      9     9      9
+     a harsher one      80     15    11     11
+     two-tone          199    172   166    159
+
+   1.55 buys nothing a shadow can use and costs the two-tone garment another
+   seven, so it is wrong. 1.25 leaves a harsh shadow visibly uneven. 1.4 reaches
+   the best a shadow gets while doing the least damage to a garment that was
+   never shaded at all. */
+const LAY_EVEN_CAP = 1.4;    /* the most the light may be scaled, either way */
+const LAY_EVEN_GRID = 10;    /* cells across; coarse, so a print is not flattened */
+
+function evenLighting(canvas){
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const im = ctx.getImageData(0, 0, w, h);
+  const d = im.data;
+
+  /* The field, averaged over the kept pixels of each cell. Cells with almost
+     nothing in them are left empty rather than believed -- a cell clipped by
+     the garment's edge holds a handful of half-transparent pixels, and letting
+     those set the light for that corner is how you get a bright halo. */
+  const G = LAY_EVEN_GRID;
+  const sum = new Float64Array(G*G), cnt = new Float64Array(G*G);
+  for(let y = 0; y < h; y++){
+    const gy = Math.min(G-1, (y / h * G) | 0);
+    for(let x = 0; x < w; x++){
+      const p = (y*w + x)*4;
+      if(d[p+3] < 128) continue;
+      const gx = Math.min(G-1, (x / w * G) | 0);
+      const L = 0.2126*d[p] + 0.7152*d[p+1] + 0.0722*d[p+2];
+      sum[gy*G + gx] += L;
+      cnt[gy*G + gx] += 1;
+    }
+  }
+  const cellMin = (w*h) / (G*G) * 0.15;
+  const field = new Float64Array(G*G);
+  const have = new Uint8Array(G*G);
+  const vals = [];
+  for(let i = 0; i < G*G; i++){
+    if(cnt[i] >= cellMin){ field[i] = sum[i]/cnt[i]; have[i] = 1; vals.push(field[i]); }
+  }
+  /* Too little of the garment to say anything about how it was lit. */
+  if(vals.length < 6) return false;
+
+  /* Empty cells take the nearest filled one, spread outward. Without this the
+     edge of the garment divides by nothing. */
+  for(let pass = 0; pass < G; pass++){
+    let changed = false;
+    for(let gy = 0; gy < G; gy++){
+      for(let gx = 0; gx < G; gx++){
+        const i = gy*G + gx;
+        if(have[i]) continue;
+        let s = 0, n = 0;
+        if(gx > 0   && have[i-1]){ s += field[i-1]; n++; }
+        if(gx < G-1 && have[i+1]){ s += field[i+1]; n++; }
+        if(gy > 0   && have[i-G]){ s += field[i-G]; n++; }
+        if(gy < G-1 && have[i+G]){ s += field[i+G]; n++; }
+        if(n){ field[i] = s/n; have[i] = 2; changed = true; }
+      }
+    }
+    for(let i = 0; i < G*G; i++) if(have[i] === 2) have[i] = 1;
+    if(!changed) break;
+  }
+
+  /* The median rather than the mean: half a garment in deep shade drags a mean
+     down and then the whole picture is lifted, which is not the point. */
+  vals.sort(function(a, b){ return a - b; });
+  const target = vals[vals.length >> 1];
+  if(target < 8) return false;          /* a black piece; nothing to even out */
+
+  /* Bilinear between cell centres, so the correction has no seams in it. */
+  const at = function(x, y){
+    const fx = Math.min(G-1, Math.max(0, (x + 0.5)/w*G - 0.5));
+    const fy = Math.min(G-1, Math.max(0, (y + 0.5)/h*G - 0.5));
+    const x0 = fx|0, y0 = fy|0;
+    const x1 = Math.min(G-1, x0+1), y1 = Math.min(G-1, y0+1);
+    const tx = fx - x0, ty = fy - y0;
+    return (field[y0*G+x0]*(1-tx) + field[y0*G+x1]*tx)*(1-ty)
+         + (field[y1*G+x0]*(1-tx) + field[y1*G+x1]*tx)*ty;
+  };
+
+  for(let y = 0; y < h; y++){
+    for(let x = 0; x < w; x++){
+      const p = (y*w + x)*4;
+      if(d[p+3] < 8) continue;
+      const f = at(x, y);
+      if(f < 4) continue;
+      let g = target / f;
+      if(g > LAY_EVEN_CAP) g = LAY_EVEN_CAP;
+      if(g < 1/LAY_EVEN_CAP) g = 1/LAY_EVEN_CAP;
+      d[p]   = Math.max(0, Math.min(255, d[p]   * g));
+      d[p+1] = Math.max(0, Math.min(255, d[p+1] * g));
+      d[p+2] = Math.max(0, Math.min(255, d[p+2] * g));
+    }
+  }
+  ctx.putImageData(im, 0, 0);
+  return true;
+}
+
 function addStickerOutline(canvas, px){
   const w = canvas.width, h = canvas.height;
   const pad = Math.ceil(px) + 2;
@@ -6415,6 +6555,11 @@ async function enhanceLayImages(){
       /* Nothing painted, or what was stored could not be read. Measure the
          photograph, narrowed down by the box if one was drawn. */
       if(!cut) cut = liftForLayout(c);
+
+      /* Only once the piece is separated from its background, because the field
+         has to be measured over the garment alone -- a desk in the frame would
+         otherwise set the light for half the picture. */
+      if(cut && state.layEven) evenLighting(c);
 
       const url = cut ? addStickerOutline(c, LAY_OUTLINE).toDataURL('image/png') : null;
       _layCache.set(id, url);
@@ -7569,6 +7714,21 @@ function attachDynamicHandlers(){
       render();
       toast(state.layCut ? 'Cutting pieces out of their photos'
                          : 'Showing the photos as taken');
+    };
+  });
+
+  /* The cache holds the evened picture, so this one really does have to clear
+     it -- unlike the cut switch, which changes which path is taken rather than
+     what that path produces. */
+  document.querySelectorAll('[data-lay-even]').forEach(function(el){
+    el.onclick = async function(e){
+      e.stopPropagation();
+      state.layEven = !state.layEven;
+      _layCache.clear();
+      await savePrefs();
+      render();
+      toast(state.layEven ? 'Evening the shading out'
+                          : 'Showing the shading as photographed');
     };
   });
 
