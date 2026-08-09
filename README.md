@@ -597,6 +597,44 @@ The original script is gone, so this cannot be settled. What can be said is that
 the claim is unsupported, the two ways it might have been true have been tested
 and were not, and the way it might have been false is demonstrable.
 
+### Evening the shading out
+
+A piece photographed with a window on one side comes out half lit and half in
+shade, and the lay-out then shows you half a garment. Nothing is wrong with the
+cut — the photograph really is like that — but the point of that view is to see
+the thing.
+
+So the light is estimated across the garment on a coarse grid and divided out,
+the flat-field correction a scanner does. Luminance only, applied to all three
+channels together, so a colour is dimmed or lifted and never shifted. **Display
+only**: the stored photograph is not touched, here as everywhere else.
+
+**The difficulty is that shading and a two-tone garment are the same signal.** A
+shirt that is genuinely navy on one side and white on the other looks exactly
+like a white shirt with a shadow across it, and nothing measurable tells them
+apart — you need to know what a shirt is. So the correction is capped, and the
+cap was chosen by measuring both. Spread of brightness across the garment, tenth
+to ninetieth percentile:
+
+| | as taken | cap 1.25 | cap 1.4 | cap 1.55 |
+|---|---|---|---|---|
+| a shadow | 61 | 9 | **9** | 9 |
+| a harsher one | 80 | 15 | **11** | 11 |
+| two-tone, no shadow at all | 199 | 172 | **166** | 159 |
+
+1.55 buys a shadow nothing that 1.4 did not already give it and costs the
+two-tone garment another seven, so it is wrong. 1.25 leaves a harsh shadow
+visibly uneven. **1.4** reaches the best a shadow gets while doing the least
+damage to a garment that was never shaded.
+
+At that setting a shadow is essentially gone and a navy-and-white shirt is still
+plainly navy and white. It is a trade rather than a solution, and the switch
+under the lay-out — *Shading evened out* / *Shading left as photographed* — is
+there because on some pieces you will disagree with it.
+
+It declines rather than guesses when there is too little of the garment to
+measure a field from, or when the piece is so dark there is nothing to even out.
+
 ### Turning the cut off
 
 Under the lay-out on **Today** there is a switch: *Pieces are cut out of their

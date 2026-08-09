@@ -654,6 +654,106 @@ try {
   });
   for (const m of handMisses) failures.push(`cutting by hand: ${m}`);
 
+  // Evening the shading out. A piece shot with a window on one side comes out
+  // half lit and half dark, and the lay-out then shows half a garment.
+  //
+  // The whole difficulty is that shading and a two-tone garment are the same
+  // signal at low frequency, so a correction strong enough to flatten a shadow
+  // is strong enough to merge a navy-and-white shirt into one grey. Both are
+  // asserted here; the second is the one worth having.
+  const evenMisses = await page.evaluate(() => {
+    const missed = [];
+    const W = 460;
+    const build = (twoTone, shade) => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = W;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.fillStyle = '#6f6a60'; g.fillRect(0, 0, W, W);
+      const im = g.getImageData(0, 0, W, W), dd = im.data;
+      let s = 9;
+      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      for (let i = 0; i < dd.length; i += 4) {
+        const n = (rnd() - 0.5) * 16; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n;
+      }
+      g.putImageData(im, 0, 0);
+      const S = 380, l = document.createElement('canvas');
+      l.width = l.height = S;
+      const lx = l.getContext('2d');
+      DEMO_SHAPES.top(lx, colorByName('white').hex, S, S, {});
+      if (twoTone) {
+        lx.save();
+        lx.globalCompositeOperation = 'source-atop';
+        lx.fillStyle = colorByName('navy').hex;
+        lx.fillRect(0, 0, S / 2, S);
+        lx.restore();
+      }
+      const side = Math.round(W * 0.72), off = Math.round((W - side) / 2);
+      g.drawImage(l, off, off, side, side);
+      if (shade) {
+        const grad = g.createLinearGradient(0, 0, W, 0);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.45, 'rgba(0,0,0,0.06)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.42)');
+        g.fillStyle = grad; g.fillRect(0, 0, W, W);
+      }
+      return cv;
+    };
+    // spread of brightness across the kept pixels, which is what "half dark"
+    // actually means as a number
+    const spread = (cv) => {
+      const d = cv.getContext('2d', { willReadFrequently: true })
+        .getImageData(0, 0, cv.width, cv.height).data;
+      const v = [];
+      for (let i = 0; i < cv.width * cv.height; i++) {
+        const p = i * 4;
+        if (d[p + 3] < 128) continue;
+        v.push(0.2126 * d[p] + 0.7152 * d[p + 1] + 0.0722 * d[p + 2]);
+      }
+      if (!v.length) return null;
+      v.sort((a, b) => a - b);
+      const q = (f) => v[Math.min(v.length - 1, Math.floor(v.length * f))];
+      return q(0.90) - q(0.10);
+    };
+    const run = (twoTone, shade) => {
+      const raw = build(twoTone, shade);
+      const c = document.createElement('canvas');
+      c.width = c.height = raw.width;
+      c.getContext('2d').drawImage(raw, 0, 0);
+      if (!liftForLayout(c)) return null;
+      const before = spread(c);
+      const applied = evenLighting(c);
+      return { applied, before, after: spread(c) };
+    };
+
+    const shaded = run(false, true);
+    if (!shaded) missed.push('the shaded fixture was refused by the cut, so this tests nothing');
+    else {
+      if (!shaded.applied) missed.push('evening it out declined a plainly shaded piece');
+      // it was uneven to begin with, or the fixture has stopped biting
+      if (shaded.before < 40) {
+        missed.push(`the shaded fixture is only ${Math.round(shaded.before)} apart to begin with — it no longer tests anything`);
+      } else if (shaded.after > shaded.before * 0.4) {
+        missed.push(`shading survived: ${Math.round(shaded.before)} apart became ${Math.round(shaded.after)}`);
+      }
+    }
+
+    const two = run(true, false);
+    if (!two) missed.push('the two-tone fixture was refused by the cut, so this tests nothing');
+    else if (two.after < two.before * 0.6) {
+      // the failure this cap exists to prevent: a garment that really is two
+      // colours coming out as one
+      missed.push(`a two-tone garment was flattened: ${Math.round(two.before)} apart became ${Math.round(two.after)}`);
+    }
+
+    // and it must decline rather than guess when there is nothing to work from
+    const empty = document.createElement('canvas');
+    empty.width = empty.height = 80;
+    if (evenLighting(empty)) missed.push('evening it out claimed to work on an empty canvas');
+
+    return [...new Set(missed)];
+  });
+  for (const m of evenMisses) failures.push(`evening the light: ${m}`);
+
   // The photograph the arithmetic refuses. Measured over 180 renders -- nine
   // neutrals on four surfaces under five lighting conditions -- the automatic cut
   // refuses outright on 26 and lands below an IoU of 0.80 against the true
