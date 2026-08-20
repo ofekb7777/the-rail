@@ -1187,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.07';
+const APP_VERSION = '2026.09.08';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -7882,11 +7882,13 @@ function attachDynamicHandlers(){
     deck.classList.remove('dragging');
     window.addEventListener('resize', function(){ place(idx, false); deck.classList.remove('dragging'); });
 
-    let x0=null, y0=null, t0=0, dragging=false, axis=null, dx=0;
+    let x0=null, y0=null, dragging=false, axis=null, dx=0;
+    const hist = [];      /* the last few offsets, for the speed at release */
 
     deck.addEventListener('touchstart', function(e){
       x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-      t0 = e.timeStamp; dragging = true; axis = null; dx = 0;
+      dragging = true; axis = null; dx = 0;
+      hist.length = 0;
     }, {passive:true});
 
     deck.addEventListener('touchmove', function(e){
@@ -7907,6 +7909,7 @@ function attachDynamicHandlers(){
          where it pulls back against nothing. */
       const atEnd = (mx < 0 && idx >= cells-1) || (mx > 0 && idx <= 0);
       dx = atEnd ? mx * 0.28 : mx;
+      velAdd(hist, dx, e.timeStamp);
       deck.style.transform = 'translate3d(' + (-idx * step() + dx) + 'px,0,0)';
     }, {passive:true});
 
@@ -7915,8 +7918,10 @@ function attachDynamicHandlers(){
       dragging = false;
       if(axis !== 'x'){ x0=null; y0=null; axis=null; return; }
 
-      const dt = Math.max(1, e.timeStamp - t0);
-      const speed = Math.abs(dx) / dt;      // px per ms
+      /* The speed it was going when it left, not the speed it averaged over
+         the whole swipe -- so a flick that ends in a deliberate pause is a
+         pause, and a slow drag that ends in a flick is a flick. */
+      const speed = Math.abs(velRead(hist, e.timeStamp));   // px per ms
 
       /* A short flick counts. Distance alone means a fast, confident swipe
          is ignored while a slow drag succeeds, which is backwards from how
@@ -8217,6 +8222,52 @@ function bindReorder(){
    drag, and resisted it by a fifth of the travel. The settings sheet has
    several hundred pixels below the fold; it simply could not be scrolled.
    A gesture is a scroll or a drag, never both. */
+/* ---------- how fast the finger was actually going ----------
+   Both gestures below used to work out speed as the whole distance over the
+   whole duration, which is the gesture's *average* rather than its speed at
+   the moment of release. The two come apart in exactly the case that matters.
+
+   Flick a sheet downward and then hold still for half a second, having changed
+   your mind: the average is high, so the sheet leaves anyway. You told it to
+   stop and it went. The reverse is just as wrong -- drag slowly for a while and
+   then flick, and the average is low, so a decisive flick is ignored.
+
+   So the last few moves are kept and the speed is read off the end of them.
+   Nothing fires while a finger rests, so a history whose newest sample is older
+   than the window means the gesture ended at rest, and that is reported as
+   zero. That single line is what makes changing your mind work. */
+const VEL_WINDOW = 90;      /* ms of history the speed is read from */
+
+function velAdd(hist, v, t){
+  hist.push({v:v, t:t});
+  /* Eight samples covers the window twice over at any sane frame rate, and a
+     fixed cap means a long slow drag does not grow an array for its whole
+     length. */
+  if(hist.length > 8) hist.shift();
+}
+
+/* Signed, in px per ms. `now` is the release timestamp rather than the last
+   move's, which is what lets stillness read as stillness. */
+function velRead(hist, now){
+  if(hist.length < 2) return 0;
+  const last = hist[hist.length-1];
+  if(now - last.t > VEL_WINDOW) return 0;      /* the finger had stopped */
+  /* The oldest sample still *inside* the window, not the first one outside it.
+     Taking the one outside reaches a step too far back and averages the flick
+     together with whatever came before it -- which on a slow drag that ends in
+     a flick reads 0.46 where the flick alone is 0.8, and the gesture is missed.
+
+     Seeded with the previous sample so that moves spaced further apart than the
+     window still report the speed between two of them rather than zero. */
+  let first = hist[hist.length-2];
+  for(let i = hist.length-2; i >= 0; i--){
+    if(last.t - hist[i].t > VEL_WINDOW) break;
+    first = hist[i];
+  }
+  const dt = last.t - first.t;
+  return dt > 0 ? (last.v - first.v) / dt : 0;
+}
+
 document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   const sheet = overlay.querySelector('.sheet');
   if(!sheet) return;
@@ -8226,14 +8277,43 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
      at the top of a form. */
   const handleOnly = overlay.id === 'addOverlay';
 
-  let y0 = null, t0 = 0, dy = 0, dragging = false, viaHandle = false;
+  let y0 = null, dy = 0, dragging = false, viaHandle = false;
   let intent = null;      /* null = undecided, 'drag' = the sheet, 'scroll' = its content */
+  const hist = [];        /* the last few positions, for the speed at release */
+
+  /* Where the sheet is this instant, which during a spring-back is not where
+     the style says and not where it is heading. Grabbing one on its way home
+     has to pick it up from where it looks, or it jumps under the finger --
+     and a moving thing you cannot catch is the opposite of direct. */
+  function liveY(){
+    const t = getComputedStyle(sheet).transform;
+    if(!t || t === 'none') return 0;
+    try{
+      if(typeof DOMMatrixReadOnly === 'function') return new DOMMatrixReadOnly(t).m42;
+    }catch(err){}
+    const m = t.match(/matrix.*\((.+)\)/);
+    if(!m) return 0;
+    const parts = m[1].split(',');
+    return parseFloat(parts[parts.length - (parts.length > 6 ? 3 : 1)]) || 0;
+  }
 
   sheet.addEventListener('touchstart', function(e){
     if(!overlay.classList.contains('open')) return;
     viaHandle = !!(e.target.closest && e.target.closest('.sheet-handle'));
     if(handleOnly && !viaHandle) return;
-    y0 = e.touches[0].clientY; t0 = e.timeStamp; dy = 0;
+    /* Caught mid-return: carry on from where it is rather than from zero. */
+    dy = Math.max(0, liveY());
+    y0 = e.touches[0].clientY - dy;
+    hist.length = 0;
+    velAdd(hist, dy, e.timeStamp);
+    /* Pin it where it is *before* killing the transition. Removing an easing
+       without writing the current value first snaps the element to the value it
+       was heading for, which is the jump this is here to prevent. */
+    if(dy > 0.5){
+      sheet.style.transform = 'translateY(' + dy + 'px)';
+      sheet.style.transition = 'none';
+      sheet.classList.add('dragging');
+    }
     dragging = false;
     /* The handle is not a scroller, so a grab there is a drag from the
        start. Anywhere else waits to see which way the finger goes. */
@@ -8255,8 +8335,8 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
       intent = (raw > 0 && sheet.scrollTop <= 0) ? 'drag' : 'scroll';
       if(intent === 'drag'){
         dragging = true;
-        y0 = e.touches[0].clientY;                  // start from here, no jump
-        t0 = e.timeStamp;
+        y0 = e.touches[0].clientY - dy;             // start from here, no jump
+        hist.length = 0;
         sheet.classList.add('dragging');
         return;
       }
@@ -8264,6 +8344,7 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
     if(intent !== 'drag') return;                   // hands off: the content is scrolling
 
     dy = Math.max(0, e.touches[0].clientY - y0);    // never lift past the top
+    velAdd(hist, dy, e.timeStamp);
     sheet.style.transform = 'translateY(' + dy + 'px)';
     /* The backdrop lightens as the sheet leaves, so the page behind is
        already coming back before you let go. */
@@ -8273,7 +8354,17 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
   function endDrag(cancel){
     dragging = false;
     intent = null;
+    hist.length = 0;
+    /* Commit where the sheet actually is before handing the easing back. The
+       dragged position is written every move but only settles when the browser
+       next resolves layout, and clearing the transform in the same frame that
+       returns the transition can leave nothing for it to travel from -- the
+       sheet then arrives home with no animation at all. Reading a layout
+       property forces that resolve, which costs one reflow at the end of a
+       gesture and buys a spring-back that always happens. */
+    void sheet.offsetHeight;
     sheet.classList.remove('dragging','grabbed');
+    sheet.style.transition = '';
     sheet.style.transform = '';
     overlay.style.opacity = '';
     y0 = null;
@@ -8282,15 +8373,23 @@ document.querySelectorAll('.sheet-overlay').forEach(function(overlay){
 
   sheet.addEventListener('touchend', function(e){
     if(!dragging || y0===null){ endDrag(true); return; }
-    const dt = Math.max(1, e.timeStamp - t0);
-    const speed = dy / dt;                     // px per ms, downward positive
+    /* The speed it was going when it left, not the speed it averaged. */
+    const speed = velRead(hist, e.timeStamp);  // px per ms, downward positive
     const dismiss = dy > 110 || (speed > 0.5 && dy > 30);
 
     if(!dismiss){ endDrag(false); return; }    // springs back to where it was
 
     dragging = false; y0 = null;
+    hist.length = 0;
     sheet.classList.remove('dragging','grabbed');
-    sheet.style.transform = '';                // CSS carries it the rest of the way down
+    /* Out at the speed it was thrown: the distance still to go, divided by how
+       fast it is going. Clamped at both ends -- a gentle push should not crawl,
+       and a hard flick should not vanish before the eye follows it. */
+    const left = Math.max(1, sheet.getBoundingClientRect().height - dy);
+    const ms = Math.round(Math.max(130, Math.min(340, left / Math.max(0.8, speed))));
+    sheet.style.transition = 'transform ' + ms + 'ms cubic-bezier(.22,.9,.24,1)';
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(function(){ sheet.style.transition = ''; sheet.style.transform = ''; }, ms + 60);
     overlay.classList.remove('open');
     /* The backdrop is mid-fade under an inline opacity, which would beat the
        class on its way out. Drive it to zero instead, then hand it back. */

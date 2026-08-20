@@ -654,6 +654,116 @@ try {
   });
   for (const m of handMisses) failures.push(`cutting by hand: ${m}`);
 
+  // How a gesture ends. Both the sheet and the deck used to judge a swipe by
+  // its average speed -- total distance over total duration -- which gets the
+  // one case that matters backwards: flick a sheet down, then hold still
+  // because you have changed your mind, and the average is still high, so it
+  // leaves anyway. You told it to stop and it went.
+  //
+  // Real timing rather than faked timestamps, because the whole fix is about
+  // when events actually happened.
+  const gestureMisses = await page.evaluate(async () => {
+    const missed = [];
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const overlay = document.getElementById('detailOverlay');
+    const sheet = overlay.querySelector('.sheet');
+    if (!sheet) return ['no sheet to drag'];
+
+    const touch = (el, y) => new Touch({ identifier: 1, target: el, clientX: 40, clientY: y });
+    const fire = (type, y) => {
+      const t = touch(sheet, y);
+      sheet.dispatchEvent(new TouchEvent(type, {
+        touches: type === 'touchend' ? [] : [t],
+        changedTouches: [t], targetTouches: type === 'touchend' ? [] : [t],
+        bubbles: true, cancelable: true,
+      }));
+    };
+    const liveY = () => {
+      const t = getComputedStyle(sheet).transform;
+      if (!t || t === 'none') return 0;
+      return new DOMMatrixReadOnly(t).m42;
+    };
+    // Wait for it to finish arriving. Starting a drag while the sheet is still
+    // flying in begins it a couple of hundred pixels down, where it dismisses on
+    // distance alone and the test says nothing about speed at all.
+    const open = async () => {
+      overlay.classList.add('open');
+      sheet.style.transition = ''; sheet.style.transform = '';
+      for (let i = 0; i < 40 && liveY() > 1; i++) await wait(25);
+      if (liveY() > 1) missed.push('the sheet never settled, so these gestures start from the wrong place');
+    };
+
+    // --- flick, then change your mind and hold still ---
+    await open();
+    fire('touchstart', 100);
+    for (let i = 1; i <= 5; i++) { fire('touchmove', 100 + i * 12); await wait(16); }
+    await wait(260);                       // the pause: no move events fire
+    fire('touchend', 160);
+    await wait(60);
+    const heldOn = overlay.classList.contains('open');
+    if (!heldOn) {
+      missed.push('a flick followed by a deliberate pause still dismissed the sheet');
+    }
+    overlay.classList.remove('open');
+
+    // --- a slow drag that ends in a decisive flick ---
+    await open();
+    fire('touchstart', 100);
+    for (let i = 1; i <= 4; i++) { fire('touchmove', 100 + i * 4); await wait(90); }  // dawdling
+    for (let i = 1; i <= 4; i++) { fire('touchmove', 116 + i * 16); await wait(16); } // then gone
+    fire('touchend', 180);
+    await wait(80);
+    if (overlay.classList.contains('open')) {
+      missed.push('a slow drag ending in a flick did not dismiss the sheet');
+    }
+    overlay.classList.remove('open');
+    sheet.style.transition = ''; sheet.style.transform = '';
+
+    // --- catching one on its way back ---
+    // Released short of the bar, the sheet springs home. Grabbing it mid-flight
+    // has to pick it up where it looks, not snap it to the top first.
+    await open();
+    fire('touchstart', 100);
+    for (let i = 1; i <= 4; i++) { fire('touchmove', 100 + i * 15); await wait(16); }
+    const dragged = liveY();
+    if (dragged < 20) missed.push(`the drag only moved the sheet ${Math.round(dragged)}px, so there is no return to catch`);
+    await wait(200);                       // pause, so it will not dismiss
+    fire('touchend', 160);
+    // Poll for a moment when it is genuinely in flight rather than guessing one:
+    // the transition does not begin on the same frame as the release, so a fixed
+    // delay lands either before it starts or after it has finished.
+    let midY = 0;
+    for (let i = 0; i < 12 && midY <= 5; i++) { await wait(15); midY = liveY(); }
+    if (midY <= 5) {
+      missed.push(`the sheet never appeared mid-return (dragged to ${Math.round(dragged)}, open=${overlay.classList.contains('open')}), so catching it cannot be tested`);
+    } else {
+      fire('touchstart', 300);
+      await wait(30);
+      const caught = liveY();
+      // it must still be roughly where it was, not snapped to zero
+      if (caught < midY - 12) {
+        missed.push(`grabbing the returning sheet jumped it from ${Math.round(midY)} to ${Math.round(caught)}`);
+      }
+      fire('touchend', 300);
+    }
+    overlay.classList.remove('open');
+    sheet.style.transition = ''; sheet.style.transform = '';
+
+    // --- the reader itself, on the two shapes that matter ---
+    const now = 1000;
+    const still = [{ v: 0, t: 600 }, { v: 60, t: 700 }];
+    if (velRead(still, now) !== 0) {
+      missed.push('a history that stopped being updated did not read as still');
+    }
+    const moving = [{ v: 0, t: now - 60 }, { v: 60, t: now }];
+    if (!(velRead(moving, now) > 0.5)) {
+      missed.push(`a finger moving 60px in 60ms read as ${velRead(moving, now)}`);
+    }
+
+    return [...new Set(missed)];
+  });
+  for (const m of gestureMisses) failures.push(`gestures: ${m}`);
+
   // Evening the shading out. A piece shot with a window on one side comes out
   // half lit and half dark, and the lay-out then shows half a garment.
   //
