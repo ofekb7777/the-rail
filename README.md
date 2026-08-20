@@ -669,6 +669,52 @@ So the lay-out looks best on pieces photographed against one plain surface —
 see **Photographing a piece** above. That is the same advice the colour reader
 wants, for the same reason: both work off the outer edge of the frame.
 
+## How a gesture ends
+
+Two things in the app are dragged rather than tapped: the sheets, which you can
+pull down to dismiss, and the deck of looks on Today, which you swipe sideways.
+Both used to decide what you meant by dividing the total distance by the total
+duration — the gesture's **average** speed.
+
+That gets the one case that matters backwards. Flick a sheet downward and then
+hold still for half a second because you have changed your mind: the average is
+still high, so the sheet leaves anyway. **You told it to stop and it went.** The
+reverse is as bad — drag slowly for a while and then flick, and the average is
+low, so a decisive flick is ignored.
+
+So the last few positions are kept and the speed is read off the end of them,
+over a 90 ms window. Nothing fires while a finger rests, so a history whose
+newest sample is older than that window means the gesture ended at rest, and it
+reports zero. That single line is what makes changing your mind work.
+
+One thing that had to be got right rather than assumed: the window takes the
+oldest sample still *inside* it, not the first one outside. Taking the one
+outside reaches a step too far back and averages the flick together with the
+dawdling before it — measured at **0.46** where the flick alone is **0.8**, on
+either side of a threshold of 0.5. The gesture was silently missed, and the test
+is what found it.
+
+**A sheet leaves at the speed it was thrown.** The distance still to go divided
+by how fast it is going, clamped at both ends so a gentle push does not crawl and
+a hard flick does not vanish before the eye can follow it.
+
+**A sheet can be caught on its way back.** Released short of the bar it springs
+home, and grabbing it mid-flight picks it up from where it *looks* rather than
+snapping it to the top first. That needs the current position written down before
+the easing is removed — take the easing away first and the element jumps to the
+value it was heading for, which is the exact jump the feature exists to prevent.
+Both halves are tested by re-introducing them.
+
+The deck already resists at its ends rather than stopping dead, so the boundary
+behaviour that principle asks for was there; the sheets have a hard top edge on
+purpose, since lifting one off the bottom of the screen shows a gap rather than
+resistance.
+
+Left alone deliberately: these are touch handlers rather than pointer ones. The
+scroll-versus-drag decision inside them is tuned against real phones, and this is
+a phone-first app — rewriting that for mouse support is a change with more risk
+in it than value.
+
 ## The back gesture
 
 Swiping back, or pressing Back, closes whatever panel is open instead of
