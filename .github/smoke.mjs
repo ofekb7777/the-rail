@@ -9,6 +9,13 @@
 // Served over http://localhost rather than file:// because the app treats
 // those differently on purpose: the service worker only registers on a real
 // origin, and file:// would skip the code path users actually get.
+//
+// A note for anyone running this by hand: `npx playwright install chromium` on
+// the build machine fetches chrome-headless-shell, which is not the same binary
+// as a local full Chromium and is not as fast. An assertion about an
+// intermediate animation frame passed here and failed there for that reason
+// alone. Nothing below should be timing-sensitive; if something has to be, stage
+// the timing rather than race it.
 
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
@@ -722,27 +729,35 @@ try {
     // --- catching one on its way back ---
     // Released short of the bar, the sheet springs home. Grabbing it mid-flight
     // has to pick it up where it looks, not snap it to the top first.
+    //
+    // The flight is staged rather than produced by a real release. Doing it the
+    // other way means racing the app's own 340ms ease and reading it at the
+    // right instant, which passed here and failed on the build machine -- an
+    // assertion about an intermediate frame is decided by how loaded the box is,
+    // not by whether the code is right. A three-second linear return has a
+    // window nothing can lose, and it exercises the same three lines: read where
+    // it is, pin it there, take the easing off.
     await open();
-    fire('touchstart', 100);
-    for (let i = 1; i <= 4; i++) { fire('touchmove', 100 + i * 15); await wait(16); }
-    const dragged = liveY();
-    if (dragged < 20) missed.push(`the drag only moved the sheet ${Math.round(dragged)}px, so there is no return to catch`);
-    await wait(200);                       // pause, so it will not dismiss
-    fire('touchend', 160);
-    // Poll for a moment when it is genuinely in flight rather than guessing one:
-    // the transition does not begin on the same frame as the release, so a fixed
-    // delay lands either before it starts or after it has finished.
-    let midY = 0;
-    for (let i = 0; i < 12 && midY <= 5; i++) { await wait(15); midY = liveY(); }
-    if (midY <= 5) {
-      missed.push(`the sheet never appeared mid-return (dragged to ${Math.round(dragged)}, open=${overlay.classList.contains('open')}), so catching it cannot be tested`);
+    sheet.style.transition = 'none';
+    sheet.style.transform = 'translateY(80px)';
+    void sheet.offsetHeight;                       // commit the start
+    sheet.style.transition = 'transform 3000ms linear';
+    sheet.style.transform = 'translateY(0px)';     // now heading home, slowly
+    await wait(150);
+    const midY = liveY();
+    if (!(midY > 40 && midY < 80)) {
+      missed.push(`staging a slow return did not work: the sheet sat at ${Math.round(midY)} rather than partway`);
     } else {
       fire('touchstart', 300);
-      await wait(30);
       const caught = liveY();
-      // it must still be roughly where it was, not snapped to zero
       if (caught < midY - 12) {
         missed.push(`grabbing the returning sheet jumped it from ${Math.round(midY)} to ${Math.round(caught)}`);
+      }
+      // and it must have stopped travelling, not carried on under the finger
+      await wait(120);
+      const held = liveY();
+      if (Math.abs(held - caught) > 6) {
+        missed.push(`the caught sheet kept moving on its own, ${Math.round(caught)} to ${Math.round(held)}`);
       }
       fire('touchend', 300);
     }
