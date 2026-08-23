@@ -1187,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.08';
+const APP_VERSION = '2026.09.09';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1314,6 +1314,69 @@ const HARMONY_SCORE = {
   'High-contrast neutrals':4.5, 'Tonal':4.2, 'Neutral pair':4,
   'Monochrome':3.8, 'Triadic':3, 'Contrasting':1
 };
+
+/* The nine relationships above, ordered for a picker rather than by score, each
+   with the shortest true description of it. */
+const HARMONY_RULES = [
+  {v:'Monochrome',             label:'Monochrome — one colour throughout'},
+  {v:'Tonal',                  label:'Tonal — neutrals a shade apart'},
+  {v:'Neutral pair',           label:'Neutral pair — two quiet colours'},
+  {v:'High-contrast neutrals', label:'High-contrast neutrals — black with cream'},
+  {v:'Neutral anchor',         label:'Neutral anchor — one colour, the rest quiet'},
+  {v:'Analogous',              label:'Analogous — neighbours on the wheel'},
+  {v:'Complementary',          label:'Complementary — opposites on the wheel'},
+  {v:'Triadic',                label:'Triadic — evenly spaced'},
+  {v:'Contrasting',            label:'Contrasting — a wide, deliberate gap'}
+];
+
+/* What a relationship is worth when a look is being ranked.
+
+   On automatic this is the table above, which is the app's own opinion about
+   which pairings are hardest to get wrong. Choose a rule instead and that one is
+   lifted to the top; nothing else is lowered.
+
+   The asymmetry is deliberate. The same number becomes the percentage a look is
+   shown with, so scaling the others down would drop every score on screen and
+   read as the app having got worse at its job -- when all that happened is that
+   you said what you like. A preference should decide which of the good looks you
+   are shown first, not take marks off the rest.
+
+   Deliberately not used by comboWorks, which decides whether a look is workable
+   at all and feeds the counts in Stats. Whether an outfit works is not a matter
+   of taste, and "156 complete looks" must not change because a dropdown did. */
+function harmonyValue(rule){
+  const base = HARMONY_SCORE[rule] || 1;
+  if(!state.harmony || state.harmony === 'auto') return base;
+  return rule === state.harmony ? Math.max(base, 5.4) : base;
+}
+
+/* Whether the wardrobe can deliver what has been asked for. Choosing a rule your
+   clothes cannot make is not an error, but being told nothing and seeing nothing
+   change would be baffling -- so it says so. Counted over the distinct colours
+   owned rather than over whole looks, which is a hundredth of the work and
+   answers the same question. */
+function harmonyReach(){
+  if(!state.harmony || state.harmony === 'auto') return '';
+  const owned = [];
+  state.items.forEach(function(i){
+    if(i.color && owned.indexOf(i.color) < 0) owned.push(i.color);
+  });
+  if(owned.length < 2) return 'Not enough pieces yet to tell what this will change.';
+  let hit = 0, total = 0;
+  for(let i = 0; i < owned.length; i++){
+    for(let j = i+1; j < owned.length; j++){
+      total++;
+      if(harmonyBetween(owned[i], owned[j]).rule === state.harmony) hit++;
+    }
+  }
+  if(!hit){
+    return 'Nothing you own pairs that way yet, so this will not change what you '
+         + 'are shown until something does.';
+  }
+  return hit + ' of the ' + total + ' colour pairs you own ' + (hit===1?'is':'are')
+       + ' ' + state.harmony.toLowerCase() + '. Looks built from '
+       + (hit===1?'it':'those') + ' come first.';
+}
 
 /* For an anchor colour, sort every other palette colour by how well it pairs. */
 function harmonyPartners(anchorName){
@@ -1524,6 +1587,7 @@ let state = {
      see the photograph instead of arguing with it. */
   layCut: true,
   layEven: true,
+  harmony: 'auto',
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1624,6 +1688,12 @@ async function loadAll(){
      existed, which should get the cut-outs rather than be silently opted out. */
   if(prefs.layCut === false) state.layCut = false;
   if(prefs.layEven === false) state.layEven = false;
+  /* Checked against the list rather than trusted, so a value from a hand-edited
+     backup cannot leave the ranker preferring a rule that does not exist. */
+  if(prefs.harmony && (prefs.harmony === 'auto'
+      || HARMONY_RULES.some(function(r){ return r.v === prefs.harmony; }))){
+    state.harmony = prefs.harmony;
+  }
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now.
@@ -1689,7 +1759,7 @@ function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
     temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut,
-    layEven: state.layEven
+    layEven: state.layEven, harmony: state.harmony
   });
 }
 
@@ -2961,7 +3031,7 @@ function colourScore(items){
   for(let i=0;i<items.length;i++){
     for(let j=i+1;j<items.length;j++){
       const h = harmonyBetween(cols[i], cols[j]);
-      const v = HARMONY_SCORE[h.rule] || 1;
+      const v = harmonyValue(h.rule);
       sum += v; n++;
       if(v > bestVal){ bestVal = v; bestRule = h.rule; bestPair = [items[i], items[j]]; bestNote = h.note; }
     }
@@ -7423,6 +7493,26 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
+    +   '<div class="sb-title">Colour matching</div>'
+    +   '<div class="sb-sub">Which colour relationship the stylist reaches for first. '
+    +     'On <em>Automatic</em> it uses whichever suits each piece, which is what it has '
+    +     'always done. Pick one instead and looks that achieve it are offered first &mdash; '
+    +     'nothing else is marked down, and what counts as a workable outfit does not change.'
+    +   '</div>'
+    +   '<label class="field" style="margin-top:10px;"><span>Prefer</span>'
+    +     '<select id="harmonySelect">'
+    +       '<option value="auto"' + (state.harmony === 'auto' ? ' selected' : '') + '>Automatic — whatever suits the piece</option>'
+    +       HARMONY_RULES.map(function(r){
+              return '<option value="'+escapeHtml(r.v)+'"'
+                   + (state.harmony === r.v ? ' selected' : '') + '>'
+                   + escapeHtml(r.label) + '</option>';
+            }).join('')
+    +     '</select>'
+    +   '</label>'
+    +   (harmonyReach() ? '<div class="sb-stat">'+escapeHtml(harmonyReach())+'</div>' : '')
+    + '</div>'
+
+    + '<div class="settings-block">'
     +   '<div class="sb-title">Version</div>'
     +   versionBlock()
     + '</div>'
@@ -7478,6 +7568,20 @@ function renderSettingsBody(){
 }
 
 function bindSettingsHandlers(){
+  const harmony = document.getElementById('harmonySelect');
+  if(harmony) harmony.onchange = async function(){
+    state.harmony = harmony.value;
+    await savePrefs();
+    /* Every look on Today was ranked under the old preference, so the tab has to
+       be built again rather than left showing an order that no longer follows
+       from the setting. */
+    render();
+    renderSettingsBody();
+    toast(state.harmony === 'auto'
+      ? 'Back to whatever suits each piece'
+      : 'Leading with ' + state.harmony.toLowerCase());
+  };
+
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
 
