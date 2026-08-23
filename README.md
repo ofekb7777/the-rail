@@ -669,6 +669,36 @@ So the lay-out looks best on pieces photographed against one plain surface —
 see **Photographing a piece** above. That is the same advice the colour reader
 wants, for the same reason: both work off the outer edge of the frame.
 
+## Choosing what the stylist leads with
+
+The app describes every pair of colours by the relationship between them — nine
+of them, from *Monochrome* through *Complementary* to *Contrasting* — and each
+carries a score for how hard that pairing is to get wrong. Those scores are what
+rank one look above another.
+
+**Settings → Colour matching** lets you put your thumb on that. *Automatic*, the
+default, is what the app has always done: whichever relationship suits each
+piece. Choose a rule instead and looks that achieve it are offered first.
+
+Two things about how it is wired, both deliberate:
+
+**It lifts, and never marks anything down.** The chosen rule goes to the top of
+the table; every other rule keeps the score it had. The obvious alternative —
+scale the rest down — is wrong, because that same number becomes the percentage a
+look is shown with. Demoting the others would drop every score on screen and read
+as the app having got worse at its job, when all that happened is that you said
+what you like.
+
+**It does not touch what counts as a workable outfit.** Whether a look works at
+all is decided separately, and the counts in *Stats* are built on that. "156
+complete looks" must not change because a dropdown did — taste is not the same
+question as whether an outfit holds together. The test asserts it across all nine
+rules; with the boundary open, preferring *Contrasting* turned 16 workable looks
+into 20.
+
+If your wardrobe cannot make the rule you asked for, the setting says so rather
+than quietly doing nothing: *"Nothing you own pairs that way yet."*
+
 ## How a gesture ends
 
 Two things in the app are dragged rather than tapped: the sheets, which you can
