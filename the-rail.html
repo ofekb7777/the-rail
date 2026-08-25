@@ -1187,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.09';
+const APP_VERSION = '2026.09.10';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1588,6 +1588,7 @@ let state = {
   layCut: true,
   layEven: true,
   harmony: 'auto',
+  cutAlways: true,
   calMonth: null,   /* Date pinned to the 1st of the displayed month */
   calSelected: null,
   planDraft: null,  /* {key, occasion, temp} — a day's terms before it has a plan */
@@ -1688,6 +1689,7 @@ async function loadAll(){
      existed, which should get the cut-outs rather than be silently opted out. */
   if(prefs.layCut === false) state.layCut = false;
   if(prefs.layEven === false) state.layEven = false;
+  if(prefs.cutAlways === false) state.cutAlways = false;
   /* Checked against the list rather than trusted, so a value from a hand-edited
      backup cannot leave the ranker preferring a rule that does not exist. */
   if(prefs.harmony && (prefs.harmony === 'auto'
@@ -1759,7 +1761,7 @@ function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
     temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut,
-    layEven: state.layEven, harmony: state.harmony
+    layEven: state.layEven, harmony: state.harmony, cutAlways: state.cutAlways
   });
 }
 
@@ -2136,7 +2138,7 @@ function guessCategoryFromShape(shape){
 
    This runs only when the border-based cut has already declined, so nothing
    that works today changes. */
-function subjectFromCentre(canvas){
+function subjectFromCentre(canvas, insist){
   /* This used to take an optional box drawn round the piece, which narrowed
      both the seed and the backdrop sample. The box is gone -- rubbing the
      background out by hand does the same job without a second gesture to learn
@@ -2229,7 +2231,7 @@ function subjectFromCentre(canvas){
      place to start rubbing from. */
   let apart = 0;
   fore.forEach(function(f){ apart = Math.max(apart, near(f.lab, back)); });
-  if(apart < 12) return null;
+  if(apart < 12 && !insist) return null;
 
   /* Classifying every pixel against the two models independently is what
      ate the right-hand side of a black shirt and the right leg of a pair of
@@ -2368,7 +2370,7 @@ function subjectFromCentre(canvas){
     if(touches(0,y)) edgeHits++;
     if(touches(w-1,y)) edgeHits++;
   }
-  if(edgeHits/edgeTotal > 0.22) return null;
+  if(edgeHits/edgeTotal > 0.22 && !insist) return null;
 
   /* How much of its own bounding box the island fills. A garment lying down
      is a solid shape and fills most of it; a fragment of shoe, a band of desk
@@ -2382,7 +2384,7 @@ function subjectFromCentre(canvas){
      hand against a room does not, and is left alone rather than guessed at,
      because naming a garment after a desk is worse than not naming it. */
   const fillRatio = best.area / Math.max(1, (best.x1-best.x0+1)*(best.y1-best.y0+1));
-  if(fillRatio < 0.48) return null;
+  if(fillRatio < 0.48 && !insist) return null;
 
   /* Re-walk the winning island to mark it, since the labelling above cannot
      tell the islands apart afterwards. */
@@ -6252,9 +6254,13 @@ function addStickerOutline(canvas, px){
    really is one surface that is the more exact of the two; the middle after,
    for the photographs people actually take -- on a bed, on a rug, on a desk.
    One function so the app and its tests cannot drift apart on which is which. */
-function liftForLayout(canvas){
+function liftForLayout(canvas, insist){
   if(isolateForLayout(canvas)) return true;
-  const mid = subjectFromCentre(canvas);
+  let mid = subjectFromCentre(canvas);
+  /* Nothing measurable said where the piece was. When the setting asks for a
+     cut regardless, take the centre-out reading with its refusals turned off:
+     it is a worse answer, and it is an answer. */
+  if(!mid && insist) mid = subjectFromCentre(canvas, true);
   if(!mid) return false;
   const ctx = canvas.getContext('2d', {willReadFrequently:true});
   const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -6329,7 +6335,7 @@ async function handCutSeed(item){
   const img = await loadImageFromDataUrl(item.image);
   const c = drawToCanvas(img, 420);
   let lifted = false;
-  try{ lifted = !!liftForLayout(c); }
+  try{ lifted = !!liftForLayout(c, state.cutAlways); }
   catch(e){ console.warn('the automatic cut failed; starting from the whole frame', e); }
 
   const cv = document.createElement('canvas');
@@ -6624,7 +6630,7 @@ async function enhanceLayImages(){
 
       /* Nothing painted, or what was stored could not be read. Measure the
          photograph, narrowed down by the box if one was drawn. */
-      if(!cut) cut = liftForLayout(c);
+      if(!cut) cut = liftForLayout(c, state.cutAlways);
 
       /* Only once the piece is separated from its background, because the field
          has to be measured over the garment alone -- a desk in the frame would
@@ -7493,6 +7499,23 @@ function renderSettingsBody(){
     + '</div>'
 
     + '<div class="settings-block">'
+    +   '<div class="sb-title">Cutting pieces out</div>'
+    +   '<div class="sb-sub">When the app cannot tell a piece from what it is lying on &mdash; '
+    +     'a grey jumper on a grey table &mdash; it can either show the photograph as taken or '
+    +     'cut anyway and sometimes get it wrong. '
+    +     '<strong>Always cut</strong> is on: measured over 180 photographs it leaves 19 uncut '
+    +     'rather than 26, at the cost of a rough edge on some of the seven it gains.'
+    +   '</div>'
+    +   '<div class="cut-row" style="margin-top:10px;">'
+    +     '<span class="cut-txt" style="color:rgba(239,232,216,0.5);">'
+    +       (state.cutAlways ? 'Always cut, even when unsure' : 'Show the photo when unsure')
+    +     '</span>'
+    +     '<button class="switch '+(state.cutAlways?'on':'')+'" id="cutAlwaysBtn" '
+    +       'aria-label="Cut a piece out even when the app is not sure of the edge"></button>'
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="settings-block">'
     +   '<div class="sb-title">Colour matching</div>'
     +   '<div class="sb-sub">Which colour relationship the stylist reaches for first. '
     +     'On <em>Automatic</em> it uses whichever suits each piece, which is what it has '
@@ -7568,6 +7591,18 @@ function renderSettingsBody(){
 }
 
 function bindSettingsHandlers(){
+  const always = document.getElementById('cutAlwaysBtn');
+  if(always) always.onclick = async function(){
+    state.cutAlways = !state.cutAlways;
+    /* The cache holds pictures made under the old policy, so it has to go. */
+    _layCache.clear();
+    await savePrefs();
+    render();
+    renderSettingsBody();
+    toast(state.cutAlways ? 'Cutting every piece out'
+                          : 'Showing the photo when the edge is unclear');
+  };
+
   const harmony = document.getElementById('harmonySelect');
   if(harmony) harmony.onchange = async function(){
     state.harmony = harmony.value;

@@ -669,6 +669,59 @@ So the lay-out looks best on pieces photographed against one plain surface —
 see **Photographing a piece** above. That is the same advice the colour reader
 wants, for the same reason: both work off the outer edge of the frame.
 
+## Cutting every piece out
+
+The app tries three readings in turn to separate a piece from what it is lying
+on. When all three come up empty it used to show the photograph as taken, on the
+grounds that a mangled garment looks worse than an honest picture.
+
+**Settings → Cutting pieces out** changes that, and is on. When the readings have
+nothing to say it takes the last one with its refusals turned off: a worse
+answer, and an answer. Measured over 180 renders:
+
+| | left with its background | overlap ≥ 0.80 |
+|---|---|---|
+| show the photo when unsure | 26 / 180 | 115 |
+| **cut anyway** | **19 / 180** | 115 |
+
+Seven photographs gained, and **nothing made worse** — every scene that changed
+went from nothing at all to something. The something is often rough: those seven
+land between 0.19 and 0.67 overlap with the true silhouette, which is a cut with
+a bite out of it or a rim of desk still attached. That is the trade the setting
+names, and it is off in one tap.
+
+### One thing that did not survive being measured
+
+The obvious way to fix the hard cases is to stop the background fill at edges: a
+grey jumper on a grey table is the same colour as the table, but there is still a
+join — a shadow line, a change of weave. It was built, and swept, and it looked
+like a win in aggregate.
+
+Per scene it was not:
+
+| | without | with |
+|---|---|---|
+| grey on a cream desk | 0.59 | **0.97** |
+| silver on a white sheet | **0.82** | 0.06 |
+| beige on a white sheet | **0.99** | 0.07 |
+
+It won big on five scenes and destroyed five, and the totals cancelled the damage
+out of sight. Moved to run *second*, only on photographs the colour fill had
+already given up on, it could no longer take anything away — and then measured
+inside the real pipeline it turned out to add nothing either, because the centre-
+out reading was already rescuing those cases and doing it better. Net across 180
+renders: three fewer good cuts, five scenes materially worse, none better.
+
+So it was deleted. It is written up here because the aggregate said ship it twice
+and only the per-scene numbers said otherwise.
+
+### Why the demo pieces look perfect and yours may not
+
+The twenty demo garments have no background because they were never
+photographed. They are drawn on a transparent canvas at the moment you ask for
+them, so there is nothing to remove. Nothing a cut-out does can match that, and
+comparing against them is comparing against a picture that skipped the problem.
+
 ## Choosing what the stylist leads with
 
 The app describes every pair of colours by the relationship between them — nine

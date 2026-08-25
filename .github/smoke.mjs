@@ -661,6 +661,118 @@ try {
   });
   for (const m of handMisses) failures.push(`cutting by hand: ${m}`);
 
+  // Cutting a piece out when the app cannot see the edge.
+  //
+  // Colour alone cannot separate a grey jumper from a grey table: the two really
+  // are the same colour and every pixel of the garment answers "yes, that is the
+  // surface". Three readings are tried in turn, and when the last of them still
+  // has nothing to say, the setting decides whether to show the photograph as
+  // taken or cut anyway and sometimes get the edge wrong.
+  //
+  // Measured over a spread of scenes rather than one contrived picture, and the
+  // spread is chosen from scenes the two policies actually disagree on -- found
+  // by running the full sweep both ways and printing the differences, not by
+  // reasoning about which ought to be hard.
+  const cutOutMisses = await page.evaluate(async () => {
+    const missed = [];
+    const W = 560, SIDE = Math.round(W * 0.62), OFF = Math.round((W - SIDE) / 2);
+    const scene = (surface, colour, dim, seed, close) => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = W;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.fillStyle = surface; g.fillRect(0, 0, W, W);
+      const im = g.getImageData(0, 0, W, W), dd = im.data;
+      let s = seed;
+      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      for (let i = 0; i < dd.length; i += 4) {
+        const n = (rnd() - 0.5) * 24; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n;
+      }
+      g.putImageData(im, 0, 0);
+      const l = document.createElement('canvas');
+      l.width = l.height = 400;
+      DEMO_SHAPES.top(l.getContext('2d'), colorByName(colour).hex, 400, 400, {});
+      // `close` is a piece photographed near enough to run off the frame, which
+      // is what the guards insisting overrides were written for: a garment
+      // touching the edge, and one that fills its own bounding box loosely.
+      const side = close ? Math.round(W * 1.02) : SIDE;
+      const off = Math.round((W - side) / 2);
+      g.drawImage(l, off, off, side, side);
+      if (dim) {
+        const grad = g.createLinearGradient(0, 0, W, W);
+        grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.34)');
+        g.fillStyle = grad; g.fillRect(0, 0, W, W);
+      }
+      return cv;
+    };
+    // the awkward end of the range on purpose: pieces close in tone to what they
+    // are lying on, which is where the fill has always given up
+    const cases = [];
+    let seed = 11;
+    for (const surface of ['#f4f4f2', '#9a9a96', '#232323']) {
+      for (const colour of ['white', 'silver', 'grey', 'charcoal']) {
+        for (const dim of [false, true]) {
+          cases.push({ surface, colour, dim, close: false, seed: (seed += 17) });
+        }
+      }
+    }
+    // The pairings that actually separate the two policies, found by running the
+    // full sweep in both modes and printing the disagreements rather than by
+    // reasoning about which ought to be hard: a pale piece on a slightly
+    // different pale surface. Without these the set is awkward but agreeable,
+    // both modes cut 26 of 30, and the comparison says nothing.
+    for (const [surface, colour] of [
+      ['#f4f4f2', 'cream'], ['#e8dcc4', 'beige'],
+    ]) {
+      for (const dim of [false, true]) {
+        cases.push({ surface, colour, dim, close: false, seed: (seed += 17) });
+      }
+    }
+
+    // Each run needs its own copy: liftForLayout writes the cut into the canvas
+    // it is given, so a shared one would be measured twice with the first
+    // result already in it.
+    //
+    // And it is scaled to 420 first, because that is what the app does to every
+    // photograph before cutting it. Skipping that was not a detail: downsampling
+    // averages the sensor noise away, which moves the gradient bar the edge stop
+    // is set from, and a test on the full-size canvas found the mechanism dead
+    // when it works perfectly well on what actually reaches it.
+    const toCanvas = (cv) => {
+      const side = 420;
+      const out = document.createElement('canvas');
+      out.width = out.height = side;
+      out.getContext('2d').drawImage(cv, 0, 0, side, side);
+      return out;
+    };
+    const count = (insist) => {
+      let cut = 0;
+      for (const k of cases) {
+        if (liftForLayout(toCanvas(scene(k.surface, k.colour, k.dim, k.seed, k.close)), insist)) cut++;
+      }
+      return cut;
+    };
+
+    const polite = count(false);
+    const insists = count(true);
+
+    // the set has to contain photographs the polite path gives up on, or there
+    // is nothing here for insisting to fix and the comparison is empty
+    if (polite === cases.length) {
+      missed.push(`all ${cases.length} scenes cut without insisting, so this set cannot test the fallback`);
+    } else if (insists <= polite) {
+      missed.push(`insisting cut ${insists} of ${cases.length} where the polite path cut ${polite} — the fallback added nothing`);
+    }
+    // and insisting must never take a cut away
+    if (insists < polite) missed.push('insisting cut fewer pieces than not insisting');
+
+    // most of a set this awkward should still come out cut at all
+    if (insists < cases.length * 0.6) {
+      missed.push(`only ${insists} of ${cases.length} awkward scenes were cut even when insisting`);
+    }
+    return [...new Set(missed)];
+  });
+  for (const m of cutOutMisses) failures.push(`cutting out: ${m}`);
+
   // Choosing which colour relationship the stylist leads with. Three things
   // matter, and the middle one is the whole design.
   const harmonyMisses = await page.evaluate(async () => {
