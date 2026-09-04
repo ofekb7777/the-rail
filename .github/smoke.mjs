@@ -661,6 +661,80 @@ try {
   });
   for (const m of handMisses) failures.push(`cutting by hand: ${m}`);
 
+  // Clearing the crumbs. What survives the background fill is every island it
+  // could not reach, and only the biggest is the garment -- the rest are a crumb
+  // of shadow, a corner of desk in a different light, the dark line where two
+  // surfaces meet. They used to be kept, and on a photograph the fill only
+  // half-managed there are a lot of them, which is most of what a rough cut
+  // looks like.
+  //
+  // The guard that matters is the second one: a pair of shoes is two islands,
+  // and a rule that keeps only the biggest deletes the second shoe.
+  const speckMisses = await page.evaluate(() => {
+    const missed = [];
+    const W = 420;
+    const base = (draw) => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = W;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.fillStyle = '#cfc9bd'; g.fillRect(0, 0, W, W);
+      const im = g.getImageData(0, 0, W, W), dd = im.data;
+      let s = 21;
+      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      for (let i = 0; i < dd.length; i += 4) {
+        const n = (rnd() - 0.5) * 18; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n;
+      }
+      g.putImageData(im, 0, 0);
+      draw(g);
+      return cv;
+    };
+    const keptIn = (cv, x0, x1) => {
+      const d = cv.getContext('2d', { willReadFrequently: true })
+        .getImageData(0, 0, cv.width, cv.height).data;
+      let n = 0;
+      for (let y = 0; y < cv.height; y++) {
+        for (let x = Math.floor(x0 * cv.width); x < Math.floor(x1 * cv.width); x++) {
+          if (d[(y * cv.width + x) * 4 + 3] >= 128) n++;
+        }
+      }
+      return n;
+    };
+
+    // a garment, and a crumb of something else off in the corner
+    const withSpeck = base((g) => {
+      g.fillStyle = '#2f3d66'; g.fillRect(110, 90, 200, 240);
+      g.fillStyle = '#3a3f4d'; g.fillRect(360, 30, 26, 22);
+    });
+    if (!isolateForLayout(withSpeck)) {
+      missed.push('the speck fixture was refused outright, so nothing here is tested');
+    } else {
+      if (keptIn(withSpeck, 0.25, 0.75) < 1000) {
+        missed.push('clearing crumbs took the garment with them');
+      }
+      if (keptIn(withSpeck, 0.82, 1.0) > 60) {
+        missed.push(`a crumb in the corner survived the cut (${keptIn(withSpeck, 0.82, 1.0)}px)`);
+      }
+    }
+
+    // two objects of equal size: both must survive
+    const twoThings = base((g) => {
+      g.fillStyle = '#2f3d66';
+      g.fillRect(60, 140, 130, 170);
+      g.fillRect(230, 140, 130, 170);
+    });
+    if (!isolateForLayout(twoThings)) {
+      missed.push('the two-object fixture was refused, so the pair-of-shoes case is untested');
+    } else {
+      const left = keptIn(twoThings, 0.10, 0.48);
+      const right = keptIn(twoThings, 0.52, 0.90);
+      if (left < 1000 || right < 1000) {
+        missed.push(`one of two equal objects was cleared away as a crumb (left ${left}px, right ${right}px)`);
+      }
+    }
+    return [...new Set(missed)];
+  });
+  for (const m of speckMisses) failures.push(`clearing crumbs: ${m}`);
+
   // Cutting a piece out when the app cannot see the edge.
   //
   // Colour alone cannot separate a grey jumper from a grey table: the two really
