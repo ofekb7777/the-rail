@@ -690,6 +690,38 @@ land between 0.19 and 0.67 overlap with the true silhouette, which is a cut with
 a bite out of it or a rim of desk still attached. That is the trade the setting
 names, and it is off in one tap.
 
+### Sweeping up the crumbs
+
+Most of what makes a rough cut look rough is not the garment's edge. It is the
+litter: a crumb of shadow the fill stopped short of, a corner of desk caught in a
+different light, the dark seam where two surfaces meet. All of it was being kept,
+because the cut asked only whether *a* big enough island existed and then kept
+every island there was.
+
+It now drops any island smaller than a quarter of the biggest one. A quarter, and
+not "keep the largest and throw the rest away", because a pair of shoes is two
+islands and a strap laid beside a bag is three. The share was swept, over the
+same 180 renders:
+
+| smallest island kept | left with its background | overlap ≥ 0.95 |
+|---|---|---|
+| everything | 19 / 180 | 94 |
+| 6% of the biggest | 19 / 180 | 93 |
+| 12% | 19 / 180 | 93 |
+| **25%** | 19 / 180 | **97** |
+
+Per scene as well as in total, because in this file a number that only moved in
+aggregate has twice been hiding real damage. Five scenes change by more than
+0.05: four go from about 0.88 to about 0.99, and one goes 0.58 → 0.52, a picture
+that was poor either way.
+
+The threshold is not higher because of the case the sweep cannot see — every
+scene in it holds a single shirt. Asked directly, the second of two equal objects
+survives untouched at 0%, 12% and 25% alike, at exactly 8512 pixels, since it is
+the same size as the first rather than a quarter of it. The headroom above 0.25
+is what keeps that true for a *small* second piece, and the test checks both ends:
+the crumb goes, the pair stays.
+
 ### One thing that did not survive being measured
 
 The obvious way to fix the hard cases is to stop the background fill at edges: a

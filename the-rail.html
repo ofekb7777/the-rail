@@ -1187,7 +1187,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.10';
+const APP_VERSION = '2026.09.11';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1918,6 +1918,50 @@ function drawToCanvas(img, maxDim){
    box. Two jobs: proving a subject exists at all, and describing its shape so
    the category can be guessed from it. Iterative, because a garment is tens of
    thousands of pixels and recursion would blow the stack. */
+/* A speck is anything under this share of the biggest surviving island. Swept
+   against the garment's true silhouette over 180 renders:
+
+                  IoU>=0.95   IoU>=0.80
+     off                 94         115
+     0.06                93         116
+     0.12                93         116
+     0.25                97         116
+
+   and looked at per scene as well as in total, because a number that only moves
+   in aggregate has hidden real damage in this file before. At 0.25 five scenes
+   change by more than 0.05: four of them go from about 0.88 to about 0.99, and
+   one goes 0.58 to 0.52 -- a picture that was poor either way.
+
+   The number is not higher because of the case the sweep cannot see: a pair of
+   shoes is two islands and a strap beside a bag is three. Asked directly, the
+   second of two equal objects survives untouched at every threshold tried, since
+   it is the same size as the first rather than a quarter of it -- but the
+   headroom above 0.25 is what keeps that true for a small second piece. */
+const SPECK_SHARE = 0.25;
+
+/* Turn every small island of survivors into background. `seen` marks what the
+   fill cleared, so survivors are the zeroes, and this fills in the little ones. */
+function dropSpecks(seen, w, h, minArea){
+  const done = new Uint8Array(w*h);
+  for(let start = 0; start < w*h; start++){
+    if(seen[start] || done[start]) continue;
+    const island = [start];
+    done[start] = 1;
+    let qi = 0;
+    while(qi < island.length){
+      const idx = island[qi++];
+      const x = idx % w, y = (idx-x)/w;
+      if(x>0   && !seen[idx-1] && !done[idx-1]){ done[idx-1]=1; island.push(idx-1); }
+      if(x<w-1 && !seen[idx+1] && !done[idx+1]){ done[idx+1]=1; island.push(idx+1); }
+      if(y>0   && !seen[idx-w] && !done[idx-w]){ done[idx-w]=1; island.push(idx-w); }
+      if(y<h-1 && !seen[idx+w] && !done[idx+w]){ done[idx+w]=1; island.push(idx+w); }
+    }
+    if(island.length < minArea){
+      for(let i = 0; i < island.length; i++) seen[island[i]] = 1;
+    }
+  }
+}
+
 function largestSurvivor(seen, w, h){
   const label = new Uint8Array(w*h);
   let best = {area:0, x0:0, y0:0, x1:0, y1:0};
@@ -6043,6 +6087,18 @@ function isolateForLayout(canvas){
      exists at all. */
   const blob = largestSurvivor(seen, w, h);
   if(blob.area < w*h*0.012) return false;
+
+  /* What survives the fill is every island the fill could not reach, and only
+     the biggest of them is the garment. The rest are specks: a crumb of shadow
+     the fill stopped short of, a corner of desk in a different light, the dark
+     line where two surfaces meet. They were being kept, and on a photograph the
+     fill only half-managed there are a lot of them -- which is most of what a
+     rough cut actually looks like.
+
+     Not "keep the largest and drop the rest", because a pair of shoes is two
+     islands and a strap laid beside a bag is three. Anything of a reasonable
+     size against the biggest piece stays; the crumbs go. */
+  dropSpecks(seen, w, h, blob.area * SPECK_SHARE);
 
   /* Where the garment meets the white, the photo has a ramp of part-garment
      part-paper pixels. They sit below the threshold, so the fill stops short
