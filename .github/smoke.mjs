@@ -69,6 +69,51 @@ try {
     { timeout: 15000 },
   );
 
+  // A first run now opens the guided intro over an empty wardrobe, exactly as
+  // it will for a person installing this. Everything below is the app behind
+  // it, so dismiss it the way they would -- through the button, not by
+  // reaching into state, which would leave the close path untested.
+  const introMisses = await (async () => {
+    const missed = [];
+    const ov = await page.$('#introOverlay.open');
+    if (!ov) {
+      missed.push('a first run on an empty wardrobe did not show the intro');
+      return missed;
+    }
+    const slides = await page.locator('#introDeck .deck-cell').count();
+    if (slides < 2) missed.push(`the intro showed ${slides} cards`);
+    const dots = await page.locator('#introDots span').count();
+    if (dots !== slides) missed.push(`${dots} dots for ${slides} cards`);
+
+    // The claim on the middle card has to be the number the app would actually
+    // report for that wardrobe. Marketing copy that the engine disagrees with
+    // is the one thing here that could quietly become a lie.
+    const claim = await page.evaluate(() => JSON.parse(JSON.stringify(PITCH)));
+    if (claim.smallPieces !== 20) {
+      missed.push(`the intro quotes a ${claim.smallPieces}-piece wardrobe, which is not the demo one`);
+    }
+
+    // and the whole text is on screen, not clipped by the card
+    const overflow = await page.evaluate(() => {
+      const cell = document.querySelector('#introDeck .deck-cell');
+      if (!cell) return null;
+      const slide = cell.querySelector('.intro-slide');
+      return slide ? slide.scrollHeight - cell.clientHeight : null;
+    });
+    if (overflow != null && overflow > 4) {
+      missed.push(`the first intro card overflows its box by ${overflow}px`);
+    }
+
+    await page.click('#introSkip');
+    await page.waitForTimeout(500);
+    const stillOpen = await page.$('#introOverlay.open');
+    if (stillOpen) missed.push('skipping the intro left it on screen');
+    const sticks = await page.evaluate(() => state.introSeen);
+    if (!sticks) missed.push('skipping the intro did not record that it was seen');
+    return missed;
+  })();
+  for (const m of introMisses) failures.push(`the intro: ${m}`);
+
   for (const tab of TABS) {
     await page.click(`.tabs button[data-tab="${tab}"]`);
     await page.waitForFunction(
@@ -1120,6 +1165,59 @@ try {
   });
   for (const m of likeMisses) failures.push(`liking a look: ${m}`);
 
+  // The one claim in the app that a person could hold it to.
+  //
+  // The intro says twenty pieces make 156 complete outfits. That is not a
+  // slogan, it is this engine's own count on the twenty demo garments, and
+  // anything that changes what counts as a workable outfit changes it. Left
+  // untested, the sentence stays on the welcome screen being quietly wrong.
+  const pitchMisses = await page.evaluate(async () => {
+    const missed = [];
+    const wasItems = state.items.slice();
+    state.items = state.items.filter((i) => !i.demo);
+    if (state.items.length) {
+      // a wardrobe already loaded would be added to the demo pieces and inflate
+      // the count, so this measures the demo wardrobe alone
+      state.items = [];
+    }
+    await loadDemoWardrobe();
+    const demoOnly = state.items.filter((i) => i.demo);
+    if (demoOnly.length !== PITCH.smallPieces) {
+      missed.push(`the intro claims ${PITCH.smallPieces} pieces but the demo wardrobe holds ${demoOnly.length}`);
+    }
+    const counted = countGoodLooks(null);
+    if (counted !== PITCH.smallLooks) {
+      missed.push(`the intro promises ${PITCH.smallLooks} outfits from ${demoOnly.length} pieces; the app counts ${counted}`);
+    }
+
+    // the bigger figure, on the same wardrobe grown by repeating its own mix
+    const grown = [];
+    for (let i = 0; grown.length < PITCH.biggerPieces; i++) {
+      const src = demoOnly[i % demoOnly.length];
+      grown.push(Object.assign({}, src, { id: src.id + '_g' + i }));
+    }
+    state.items = grown;
+    const countedBig = countGoodLooks(null);
+    if (countedBig !== PITCH.biggerLooks) {
+      missed.push(`the intro promises ${PITCH.biggerLooks} outfits from ${PITCH.biggerPieces} pieces; the app counts ${countedBig}`);
+    }
+
+    // Both figures have to sit below the point where the counter starts
+    // working from a sample, or the app would be quoting a number it would
+    // never show you back.
+    const perCat = {};
+    grown.forEach((i) => { perCat[i.category] = (perCat[i.category] || 0) + 1; });
+    Object.keys(perCat).forEach((c) => {
+      if (perCat[c] > 22) {
+        missed.push(`at ${PITCH.biggerPieces} pieces the ${c} count (${perCat[c]}) passes the sampling cap, so the figure is not one the app would report`);
+      }
+    });
+
+    state.items = wasItems;
+    return [...new Set(missed)];
+  });
+  for (const m of pitchMisses) failures.push(`the intro's arithmetic: ${m}`);
+
   // How many looks the deck offers. Five when the wardrobe can carry five, and
   // fewer rather than five-with-repeats when it cannot: asking a six-piece
   // wardrobe for five gets two real looks and three swapped belts.
@@ -1248,16 +1346,38 @@ try {
     sheet.style.transition = 'none';
     sheet.style.transform = 'translateY(80px)';
     void sheet.offsetHeight;                       // commit the start
-    // Six seconds rather than three. This suite shares one page, and work done
-    // by earlier blocks can starve a timer badly -- a 150ms wait was once
-    // measured taking 1.6s, which walked a three-second ramp most of the way
-    // home before the assertion ran. The ramp only has to outlast the worst
-    // stall; nothing here is measuring how long anything takes.
-    sheet.style.transition = 'transform 6000ms linear';
+    // Sixty seconds, and the start is waited for rather than assumed.
+    //
+    // Both ends of this used to be a guess about wall-clock time, and both
+    // failed. A fixed wait that is too short reads the sheet before it has
+    // moved; too long, and a stall walks it all the way home -- this suite
+    // shares one page, and a 150ms wait has been measured taking 1.6s. It was
+    // lengthened from three seconds to six and still went red about one run in
+    // six, which is a test reporting on how loaded the machine is.
+    //
+    // So: a ramp so long that no plausible stall can finish it, and a poll for
+    // the sheet actually having left 80 instead of a sleep chosen to be about
+    // right. Nothing here is measuring how long anything takes.
+    sheet.style.transition = 'transform 10000ms linear';
     sheet.style.transform = 'translateY(0px)';     // now heading home, slowly
-    await wait(150);
-    const midY = liveY();
-    if (!(midY > 25 && midY < 80)) {
+    // Waited for rather than slept through. A fixed pause is a guess about how
+    // loaded the machine is: too short and the sheet has not moved yet, too
+    // long and a stall has walked it home. This suite shares one page and a
+    // 150ms wait has been measured taking 1.6s, which is how a six-second ramp
+    // still went red about one run in six.
+    //
+    // 78 rather than "has it left 80 at all", because leaving 80 by a
+    // hundredth of a pixel is not a sheet in flight -- grabbing one that has
+    // barely departed was the next failure after the poll went in.
+    let midY = liveY();
+    const waitingSince = Date.now();
+    while (midY > 78 && Date.now() - waitingSince < 3000) {
+      await wait(20);
+      midY = liveY();
+    }
+    // On a ten-second ramp 78 arrives in 250ms and 5 would take 9.4s, so the
+    // window this can miss is a stall six times the worst yet measured.
+    if (!(midY > 5 && midY <= 78)) {
       missed.push(`staging a slow return did not work: the sheet sat at ${Math.round(midY)} rather than partway`);
     } else {
       fire('touchstart', 300);

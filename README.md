@@ -754,6 +754,51 @@ photographed. They are drawn on a transparent canvas at the moment you ask for
 them, so there is nothing to remove. Nothing a cut-out does can match that, and
 comparing against them is comparing against a picture that skipped the problem.
 
+## The first time you open it
+
+Three cards, once, over an empty wardrobe. The first says what the app is, the
+third says to add one piece. The middle one is the only one that had to be
+argued for, because it makes a claim:
+
+> **156** complete outfits from just 20 pieces — about 5 months without
+> repeating yourself.
+
+That is not a slogan. It is this app's own counter, run on the twenty demo
+garments, and there is a test that fails the build if the two ever disagree.
+
+### Getting the number honest took three tries
+
+**The pitch as first framed** was that four things come off a day, so a month
+gives you 120 pieces and "almost 600 outfits, two years of clothing". The
+arithmetic is far too modest. Measured on real clothes, 120 pieces make tens of
+thousands of combinations — the problem with the claim was that it undersold
+the app, not that it oversold it.
+
+**The first measurement flattered it.** A synthetic wardrobe of tidy neutrals
+scored 235 workable outfits out of 240 possible — a hit rate no real wardrobe
+has. Rebuilt by growing the demo wardrobe from its own colour and formality
+mix, the honest figures are:
+
+| pieces | complete outfits | at one a day |
+|---|---|---|
+| 20 | 156 | 5 months |
+| 40 | 1,248 | 3½ years |
+| 120 | 33,696 | — |
+
+**The big numbers were then thrown away on purpose.** Past about twenty pieces
+in one category the counter works from a sample rather than the whole wardrobe:
+at 60 pieces it reports 2,808 against a true 4,212. Quoting 33,696 would mean
+the welcome screen promising a number the app itself would never show you. Both
+figures on the card sit below that line, and a test asserts they do.
+
+One more thing the screen does not say: *"over 1,248"*. It is 1,248. Every other
+figure on that card is exact, so one idly inflating word beside them makes the
+rest look approximate.
+
+The cards ride the same swipeable deck as the looks on Today — the gesture you
+learn here is the one you use afterwards — and it is in **Settings → The
+introduction** if you want it again.
+
 ## Liking a look
 
 Every look the stylist offers carries a **More like this** button next to *Save*.
@@ -848,6 +893,23 @@ into 20.
 
 If your wardrobe cannot make the rule you asked for, the setting says so rather
 than quietly doing nothing: *"Nothing you own pairs that way yet."*
+
+### A test that reported on the machine, not the code
+
+The block that checks a returning sheet can be caught mid-flight had a
+precondition — *is the sheet actually partway home?* — written as a fixed pause.
+That is a guess about how loaded the box is. Too short and the sheet has not
+moved; too long and a stall has walked it all the way home. It had already been
+lengthened from three seconds to six, and still went red about **one run in
+six**.
+
+The fix was to stop timing anything: a ramp long enough that no plausible stall
+can finish it, and a *poll* for the sheet having really left its start rather
+than a sleep chosen to be about right. The first attempt at that over-corrected
+— it polled for any movement at all, so it grabbed a sheet that had departed by
+a hundredth of a pixel, and the next run failed differently. It now waits for a
+real distance. Six consecutive clean runs, and it still catches the bug it was
+written for.
 
 ## How a gesture ends
 

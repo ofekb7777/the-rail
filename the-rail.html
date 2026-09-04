@@ -848,6 +848,69 @@
   }
   @media (prefers-reduced-motion: reduce){ .like-btn .heart{transition:none;} }
 
+  /* ================= THE INTRO ================= */
+  /* Same deck the looks travel on, so the one gesture you learn here is the
+     gesture you use for the rest of the app. */
+  .intro-overlay{
+    position:fixed; inset:0; z-index:80; display:none;
+    align-items:center; justify-content:center; padding:24px;
+    background:rgba(12,12,12,0.72);
+    -webkit-backdrop-filter:blur(18px) saturate(160%); backdrop-filter:blur(18px) saturate(160%);
+    opacity:0; transition:opacity .32s ease;
+  }
+  .intro-overlay.open{display:flex;}
+  .intro-overlay.shown{opacity:1;}
+  .intro-card{
+    position:relative; width:100%; max-width:420px;
+    background:var(--coal); border:1px solid rgba(239,232,216,0.1);
+    border-radius:18px; padding:22px 20px 18px; box-shadow:var(--shadow);
+    transform:translateY(14px) scale(0.98); transition:transform .42s cubic-bezier(.2,.9,.3,1);
+  }
+  .intro-overlay.shown .intro-card{transform:translateY(0) scale(1);}
+  .intro-skip{
+    position:absolute; top:14px; right:14px; z-index:2;
+    background:none; border:none; color:rgba(239,232,216,0.45);
+    font-size:12px; font-weight:600; cursor:pointer; padding:6px 8px; letter-spacing:0.4px;
+  }
+  .intro-slide{padding:14px 2px 4px; min-height:250px;}
+  .intro-mark{
+    font-size:10.5px; letter-spacing:2.4px; text-transform:uppercase;
+    color:rgba(239,232,216,0.4); margin-bottom:14px;
+  }
+  .intro-slide h3{
+    font-size:23px; line-height:1.15; letter-spacing:-0.02em; margin:0 0 12px;
+    color:var(--bone); font-weight:700;
+  }
+  .intro-slide p{
+    font-size:13.5px; line-height:1.62; color:rgba(239,232,216,0.68); margin:0 0 11px;
+  }
+  /* The one number that has to land. Big enough to be the thing you read
+     first, and paired with what it means rather than left to impress alone. */
+  .intro-figure{
+    display:flex; align-items:baseline; gap:10px; margin:16px 0 6px; flex-wrap:wrap;
+  }
+  .intro-figure b{
+    font-size:34px; line-height:1; letter-spacing:-0.03em; color:var(--bone); font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+  .intro-figure span{font-size:12.5px; color:rgba(239,232,216,0.55); line-height:1.4;}
+  .intro-sub{font-size:11.5px; color:rgba(239,232,216,0.38); line-height:1.5; margin-top:12px;}
+  .intro-actions{display:flex; gap:9px; margin-top:14px;}
+  .intro-next{
+    flex:1; background:var(--bone); color:var(--ink); border:none; border-radius:9px;
+    padding:12px 16px; font-size:13px; font-weight:700; cursor:pointer;
+    transition:transform .1s ease-out;
+  }
+  .intro-next:active{transform:scale(0.975);}
+  @media (prefers-reduced-motion: reduce){
+    .intro-overlay, .intro-card{transition:opacity .2s ease;}
+    .intro-card{transform:none;}
+    .intro-overlay.shown .intro-card{transform:none;}
+  }
+  @media (prefers-reduced-transparency: reduce){
+    .intro-overlay{background:var(--ink); -webkit-backdrop-filter:none; backdrop-filter:none;}
+  }
+
   .loading-dots{display:inline-flex; gap:4px; align-items:center;}
   .loading-dots span{width:5px;height:5px;border-radius:50%;background:currentColor; animation:pulse 1.2s infinite ease-in-out;}
   .loading-dots span:nth-child(2){animation-delay:.15s;}
@@ -1147,6 +1210,19 @@
   </div>
 </div>
 
+<div class="intro-overlay" id="introOverlay" role="dialog" aria-modal="true" aria-label="Welcome to THE RAIL">
+  <div class="intro-card">
+    <button class="intro-skip" id="introSkip">Skip</button>
+    <div class="deck-viewport" id="introViewport">
+      <div class="deck" id="introDeck"></div>
+    </div>
+    <div class="deck-dots" id="introDots"></div>
+    <div class="intro-actions">
+      <button class="intro-next" id="introNext">Next</button>
+    </div>
+  </div>
+</div>
+
 <div class="sheet-overlay" id="detailOverlay">
   <div class="sheet" id="detailSheet"></div>
 </div>
@@ -1207,7 +1283,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.12';
+const APP_VERSION = '2026.09.13';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1605,6 +1681,7 @@ let state = {
   anchorId: null,
   activeOption: 0,
   swipeHintSeen: false,
+  introSeen: false,   /* the guided intro, shown once on a first run */
   reorderHintSeen: false,
   update: {status:'unknown', latest:null, checkedAt:0},   /* 'current' | 'stale' | 'offline' | 'unknown' */
   showGaps: false,
@@ -1714,6 +1791,7 @@ async function loadAll(){
   const prefs   = await readJson('wardrobe:prefs', {});
   if(prefs.temp) state.temp = tempBand(prefs.temp).v;
   if(prefs.reorderHintSeen) state.reorderHintSeen = true;
+  if(prefs.introSeen) state.introSeen = true;
   /* Explicitly against false: absent means a wardrobe saved before this
      existed, which should get the cut-outs rather than be silently opted out. */
   if(prefs.layCut === false) state.layCut = false;
@@ -1774,6 +1852,19 @@ async function loadAll(){
 
   render();
 
+  /* The intro, on a first run only. Gated on an empty wardrobe as well as on
+     the flag: someone restoring a backup onto a new phone has a wardrobe and
+     no stored preference, and explaining the app to them would be starting a
+     conversation they finished months ago. */
+  if(!state.introSeen && state.items.length === 0){
+    openIntro();
+  }else if(!state.introSeen){
+    /* Seen or not, a wardrobe that arrived by import has answered the question
+       the intro asks, so retire it quietly rather than lying in wait. */
+    state.introSeen = true;
+    savePrefs();
+  }
+
   /* A quiet check once the app is up. Deferred so it never competes with the
      first paint or the wardrobe loading. */
   setTimeout(function(){ checkForUpdate(false); }, 1500);
@@ -1804,7 +1895,8 @@ function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
   return saveKey('wardrobe:prefs', {
     temp: state.temp, reorderHintSeen: state.reorderHintSeen, layCut: state.layCut,
-    layEven: state.layEven, harmony: state.harmony, cutAlways: state.cutAlways
+    layEven: state.layEven, harmony: state.harmony, cutAlways: state.cutAlways,
+    introSeen: state.introSeen
   });
 }
 
@@ -3104,6 +3196,26 @@ function pairAffinity(idA, idB){
    ranker that reshapes itself around a single tap feels broken rather than
    attentive. It also has to be a clear favourite -- ahead of the runner-up,
    not tied with it -- or the app would pick a side you never picked. */
+/* The arithmetic the intro leans on, kept here rather than typed into the copy,
+   because a number in a sentence is a number nobody checks again.
+
+   Both are the app's own counter, measured on real clothes -- the twenty demo
+   pieces, and that wardrobe grown to forty by repeating its own colour and
+   formality mix so the proportion of workable combinations stays honest. A
+   first attempt used a wardrobe of tidy neutrals where 235 of 240 possible
+   outfits "worked", which flatters the claim rather than testing it.
+
+   Deliberately both below the point where the count starts sampling: past
+   about twenty pieces in one category countGoodLooks works from a sample, and
+   at sixty pieces it reports 2808 against a true 4212. Quoting a number the
+   app itself would not show you is how a claim becomes a lie. The test holds
+   these to the engine, so changing what counts as a workable outfit fails the
+   build rather than quietly making the intro wrong. */
+const PITCH = {
+  smallPieces: 20,  smallLooks: 156,    /* five months, one a day */
+  biggerPieces: 40, biggerLooks: 1248   /* three and a half years */
+};
+
 function likeKey(ids){ return (ids||[]).slice().sort().join('|'); }
 function likedAlready(ids){
   const k = likeKey(ids);
@@ -4736,7 +4848,7 @@ function renderStylistResults(){
   const many = res.outfits.length > 1;
 
   const dots = many
-    ? '<div class="deck-dots">'+res.outfits.map(function(_,i){ return '<span class="'+(i===idx?'on':'')+'"></span>'; }).join('')+'</div>'
+    ? '<div class="deck-dots" id="deckDots">'+res.outfits.map(function(_,i){ return '<span class="'+(i===idx?'on':'')+'"></span>'; }).join('')+'</div>'
     : '';
   const hint = many && !state.swipeHintSeen
     ? '<div class="deck-hint" id="deckHint">‹ swipe for the other looks ›</div>'
@@ -7686,6 +7798,11 @@ function renderSettingsBody(){
 
   el.innerHTML =
       '<div class="settings-block">'
+    +   '<div class="sb-title">The introduction</div>'
+    +   '<div class="sb-sub">The three cards shown the first time you opened the app.</div>'
+    +   '<button class="btn-secondary" id="showIntroBtn" style="margin-top:10px;">Show it again</button>'
+    + '</div>'
+    + '<div class="settings-block">'
     +   '<div class="sb-title">Export / import</div>'
     +   '<div class="sb-sub">Your wardrobe lives only on this device. Download it as a file you can keep anywhere, and load it back if you switch phone or browser, or if the data ever gets cleared.</div>'
     +   '<div class="sb-stat">'+state.items.length+' pieces · '+state.outfits.length+' saved looks · '+state.wearLog.length+' wear entries'
@@ -7818,6 +7935,15 @@ function bindSettingsHandlers(){
       : 'Leading with ' + state.harmony.toLowerCase());
   };
 
+  const introBtn = document.getElementById('showIntroBtn');
+  if(introBtn) introBtn.onclick = function(){
+    /* Out of Settings first, or the intro opens behind the sheet that launched
+       it and the only visible thing is a dimmed screen with no way off. */
+    const ov = document.getElementById('settingsOverlay');
+    if(ov) ov.classList.remove('open');
+    openIntro();
+  };
+
   const exportBtn = document.getElementById('exportBackupBtn');
   if(exportBtn) exportBtn.onclick = function(){ exportBackup(); renderSettingsBody(); };
 
@@ -7932,6 +8058,239 @@ document.getElementById('settingsOverlay').onclick = function(e){
 /* ============================================================
    EVENT WIRING FOR RE-RENDERED CONTENT
    ============================================================ */
+/* One deck, two users: the looks on Today and the cards in the intro. Pulled
+   out of the Today wiring rather than written twice, so the gesture you learn
+   on one is exactly the gesture on the other -- and so the release-velocity
+   handling, which took a rewrite to get right, has a single home.
+
+   `dots` is passed in rather than found by class. With two decks on the page a
+   querySelectorAll('.deck-dots span') reaches both, and clicking a dot under
+   one deck would drive the other. */
+/* The guided intro, shown once.
+ *
+ * Three cards, because the thing worth explaining is not the buttons -- it is
+ * why photographing a jumper on its way to the wash is worth doing at all. The
+ * middle card carries that, and carries it in numbers the app can be held to
+ * rather than adjectives it cannot.
+ */
+const INTRO_SLIDES = [
+  {
+    mark: 'The Rail',
+    title: 'Your wardrobe, on your phone.',
+    body: [
+      'Photograph your clothes as you take them off. The app reads the colour '
+        + 'straight off the photo and works the rest out from the name you give it.',
+      'No account, no internet, no AI. Everything stays on this phone.'
+    ]
+  },
+  {
+    mark: 'Why bother',
+    title: 'You already do the hard part.',
+    body: [
+      'Three or four things come off at the end of a day. Photograph them on the '
+        + 'way to the wash and in a month the rail knows your wardrobe — with no '
+        + 'evening ever set aside for it.'
+    ],
+    figure: {
+      n: String(PITCH.smallLooks),
+      /* The count is the app's own, and the months come straight from it, so
+         the sentence cannot drift away from the number beside it. */
+      cap: 'complete outfits from just ' + PITCH.smallPieces + ' pieces — about '
+        + Math.round(PITCH.smallLooks/30) + ' months without repeating yourself.'
+    },
+    /* "over 1,248" was what this said, which is not over anything -- it is the
+       number. Every other figure here is exact, so an idly inflating word next
+       to one of them is the sentence that makes the rest look approximate. */
+    sub: 'Double the wardrobe and it is '
+      + Math.floor(PITCH.biggerLooks/1000) + ',' + String(PITCH.biggerLooks%1000).padStart(3,'0')
+      + '. The rail counts them for you, and tells you which piece would add the most.'
+  },
+  {
+    mark: 'Start anywhere',
+    title: 'One piece is enough to begin.',
+    body: [
+      'Add whatever is nearest. The app will not name your clothes for you, and '
+        + 'it will not pretend to know more than it does — when it cannot tell '
+        + 'two greys apart, it says so.',
+      'Everything here works offline, and a backup is one tap in Settings.'
+    ]
+  }
+];
+
+function renderIntro(){
+  const deck = document.getElementById('introDeck');
+  const dots = document.getElementById('introDots');
+  if(!deck || !dots) return;
+  deck.innerHTML = INTRO_SLIDES.map(function(s){
+    return '<div class="deck-cell"><div class="intro-slide">'
+      + '<div class="intro-mark">'+escapeHtml(s.mark)+'</div>'
+      + '<h3>'+escapeHtml(s.title)+'</h3>'
+      + s.body.map(function(p){ return '<p>'+escapeHtml(p)+'</p>'; }).join('')
+      + (s.figure
+          ? '<div class="intro-figure"><b>'+escapeHtml(s.figure.n)+'</b>'
+            + '<span>'+escapeHtml(s.figure.cap)+'</span></div>'
+          : '')
+      + (s.sub ? '<div class="intro-sub">'+escapeHtml(s.sub)+'</div>' : '')
+      + '</div></div>';
+  }).join('');
+  dots.innerHTML = INTRO_SLIDES.map(function(_, i){
+    return '<span class="'+(i===0?'on':'')+'"></span>';
+  }).join('');
+}
+
+async function closeIntro(){
+  const ov = document.getElementById('introOverlay');
+  state.introSeen = true;
+  await savePrefs();
+  if(!ov) return;
+  ov.classList.remove('shown');
+  /* Waiting for the fade rather than cutting it, but not trusting the event:
+     a transitionend that never fires (reduced motion, a backgrounded tab)
+     would leave the overlay up and the app unusable behind it. */
+  setTimeout(function(){ ov.classList.remove('open'); }, 340);
+}
+
+function openIntro(){
+  const ov = document.getElementById('introOverlay');
+  if(!ov) return;
+  renderIntro();
+  ov.classList.add('open');
+  /* A frame between display and the class that animates it, or the browser
+     has nothing to move from and the card simply appears. */
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){ ov.classList.add('shown'); });
+  });
+
+  const next = document.getElementById('introNext');
+  const skip = document.getElementById('introSkip');
+  const deck = wireDeck(document.getElementById('introDeck'),
+                        document.getElementById('introViewport'),
+                        document.getElementById('introDots'), {
+    onLand: function(i){
+      if(next) next.textContent = i >= INTRO_SLIDES.length-1 ? 'Add your first piece' : 'Next';
+    }
+  });
+
+  if(next){
+    next.textContent = INTRO_SLIDES.length > 1 ? 'Next' : 'Add your first piece';
+    next.onclick = async function(){
+      const at = deck ? deck.at() : INTRO_SLIDES.length-1;
+      if(deck && at < INTRO_SLIDES.length-1){ tick(6); deck.land(at+1); return; }
+      await closeIntro();
+      const add = document.getElementById('addBtn') || document.querySelector('[data-do="add"]');
+      if(add) add.click();
+    };
+  }
+  /* Skip is a real way out, not a smaller Next: it closes and leaves you on
+     an empty Today, which is where you would have been anyway. */
+  if(skip) skip.onclick = function(){ closeIntro(); };
+}
+
+function wireDeck(deck, port, dots, opts){
+  if(!deck || !port) return;
+  const o = opts || {};
+  const GAP = 14;                       // matches the gap in .deck
+  const cells = deck.children.length;
+  if(!cells) return;
+  let idx = Math.min(o.start ? o.start() : 0, cells-1);
+  let swiped = false;
+
+  /* Lazy images never load while they are parked off to the side, so the
+     card you swipe to would arrive empty and fill in afterwards. */
+  deck.querySelectorAll('img[loading="lazy"]').forEach(function(img){ img.loading = 'eager'; });
+
+  function step(){ return port.clientWidth + GAP; }
+
+  function place(i, animate){
+    deck.classList.toggle('dragging', !animate);
+    deck.style.transform = 'translate3d(' + (-i * step()) + 'px,0,0)';
+    if(!animate) void deck.offsetWidth;   // commit before easing returns
+  }
+
+  function land(i){
+    idx = i;
+    if(o.onLand) o.onLand(i);
+    place(i, true);
+    if(dots){
+      dots.querySelectorAll('span').forEach(function(d, n){ d.classList.toggle('on', n === i); });
+    }
+  }
+
+  place(idx, false);
+  deck.classList.remove('dragging');
+  window.addEventListener('resize', function(){ place(idx, false); deck.classList.remove('dragging'); });
+
+  let x0=null, y0=null, dragging=false, axis=null, dx=0;
+  const hist = [];      /* the last few offsets, for the speed at release */
+
+  deck.addEventListener('touchstart', function(e){
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    dragging = true; axis = null; dx = 0;
+    hist.length = 0;
+  }, {passive:true});
+
+  deck.addEventListener('touchmove', function(e){
+    if(!dragging || x0===null) return;
+    const mx = e.touches[0].clientX - x0;
+    const my = e.touches[0].clientY - y0;
+
+    /* Decide once whether this is a swipe or a scroll. Re-deciding every
+       frame is what makes a card twitch sideways while you scroll past it. */
+    if(axis === null){
+      if(Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+      axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if(axis === 'x') deck.classList.add('dragging');
+    }
+    if(axis !== 'x') return;
+
+    /* One to one with the finger, except past either end of the strip,
+       where it pulls back against nothing. */
+    const atEnd = (mx < 0 && idx >= cells-1) || (mx > 0 && idx <= 0);
+    dx = atEnd ? mx * 0.28 : mx;
+    velAdd(hist, dx, e.timeStamp);
+    deck.style.transform = 'translate3d(' + (-idx * step() + dx) + 'px,0,0)';
+  }, {passive:true});
+
+  deck.addEventListener('touchend', function(e){
+    if(!dragging || x0===null) return;
+    dragging = false;
+    if(axis !== 'x'){ x0=null; y0=null; axis=null; return; }
+
+    /* The speed it was going when it left, not the speed it averaged over
+       the whole swipe -- so a flick that ends in a deliberate pause is a
+       pause, and a slow drag that ends in a flick is a flick. */
+    const speed = Math.abs(velRead(hist, e.timeStamp));   // px per ms
+
+    /* A short flick counts. Distance alone means a fast, confident swipe
+       is ignored while a slow drag succeeds, which is backwards from how
+       it feels in the hand. */
+    const committed = Math.abs(dx) > step() * 0.28 || (speed > 0.45 && Math.abs(dx) > 18);
+    let target = idx;
+    if(committed) target = dx < 0 ? Math.min(idx+1, cells-1) : Math.max(idx-1, 0);
+
+    if(target !== idx){
+      if(!swiped){ swiped = true; if(o.onFirstSwipe) o.onFirstSwipe(); }
+      tick(8);
+    }
+    land(target);
+    x0=null; y0=null; axis=null; dx=0;
+  }, {passive:true});
+
+  deck.addEventListener('touchcancel', function(){
+    if(!dragging) return;
+    dragging = false; axis = null; dx = 0; x0 = null; y0 = null;
+    place(idx, true);
+  }, {passive:true});
+
+  /* The dots are a control, not just a readout. */
+  if(dots){
+    dots.querySelectorAll('span').forEach(function(d, n){
+      d.onclick = function(){ if(n !== idx){ tick(6); land(n); } };
+    });
+  }
+  return {land: land, at: function(){ return idx; }, count: cells};
+}
+
 function attachDynamicHandlers(){
   const on = function(id, fn){ const el = document.getElementById(id); if(el) el.onclick = fn; };
 
@@ -8216,106 +8575,17 @@ function attachDynamicHandlers(){
   });
 
   /* --- the deck of generated looks travels under your thumb --- */
-  const deck = document.getElementById('outfitDeck');
-  const deckPort = document.getElementById('deckViewport');
-  if(deck && deckPort){
-    const GAP = 14;                       // matches the gap in .deck
-    const cells = deck.children.length;
-    let idx = Math.min(state.activeOption||0, cells-1);
-
-    /* Lazy images never load while they are parked off to the side, so the
-       card you swipe to would arrive empty and fill in afterwards. */
-    deck.querySelectorAll('img[loading="lazy"]').forEach(function(img){ img.loading = 'eager'; });
-
-    function step(){ return deckPort.clientWidth + GAP; }
-
-    function place(i, animate){
-      deck.classList.toggle('dragging', !animate);
-      deck.style.transform = 'translate3d(' + (-i * step()) + 'px,0,0)';
-      if(!animate) void deck.offsetWidth;   // commit before easing returns
+  wireDeck(document.getElementById('outfitDeck'),
+           document.getElementById('deckViewport'),
+           document.getElementById('deckDots'), {
+    start: function(){ return state.activeOption || 0; },
+    onLand: function(i){ state.activeOption = i; },
+    onFirstSwipe: function(){
+      state.swipeHintSeen = true;
+      const hint = document.getElementById('deckHint');
+      if(hint) hint.remove();
     }
-
-    function land(i){
-      idx = i;
-      state.activeOption = i;
-      place(i, true);
-      const dots = document.querySelectorAll('.deck-dots span');
-      dots.forEach(function(d, n){ d.classList.toggle('on', n === i); });
-    }
-
-    place(idx, false);
-    deck.classList.remove('dragging');
-    window.addEventListener('resize', function(){ place(idx, false); deck.classList.remove('dragging'); });
-
-    let x0=null, y0=null, dragging=false, axis=null, dx=0;
-    const hist = [];      /* the last few offsets, for the speed at release */
-
-    deck.addEventListener('touchstart', function(e){
-      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-      dragging = true; axis = null; dx = 0;
-      hist.length = 0;
-    }, {passive:true});
-
-    deck.addEventListener('touchmove', function(e){
-      if(!dragging || x0===null) return;
-      const mx = e.touches[0].clientX - x0;
-      const my = e.touches[0].clientY - y0;
-
-      /* Decide once whether this is a swipe or a scroll. Re-deciding every
-         frame is what makes a card twitch sideways while you scroll past it. */
-      if(axis === null){
-        if(Math.abs(mx) < 6 && Math.abs(my) < 6) return;
-        axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
-        if(axis === 'x') deck.classList.add('dragging');
-      }
-      if(axis !== 'x') return;
-
-      /* One to one with the finger, except past either end of the strip,
-         where it pulls back against nothing. */
-      const atEnd = (mx < 0 && idx >= cells-1) || (mx > 0 && idx <= 0);
-      dx = atEnd ? mx * 0.28 : mx;
-      velAdd(hist, dx, e.timeStamp);
-      deck.style.transform = 'translate3d(' + (-idx * step() + dx) + 'px,0,0)';
-    }, {passive:true});
-
-    deck.addEventListener('touchend', function(e){
-      if(!dragging || x0===null) return;
-      dragging = false;
-      if(axis !== 'x'){ x0=null; y0=null; axis=null; return; }
-
-      /* The speed it was going when it left, not the speed it averaged over
-         the whole swipe -- so a flick that ends in a deliberate pause is a
-         pause, and a slow drag that ends in a flick is a flick. */
-      const speed = Math.abs(velRead(hist, e.timeStamp));   // px per ms
-
-      /* A short flick counts. Distance alone means a fast, confident swipe
-         is ignored while a slow drag succeeds, which is backwards from how
-         it feels in the hand. */
-      const committed = Math.abs(dx) > step() * 0.28 || (speed > 0.45 && Math.abs(dx) > 18);
-      let target = idx;
-      if(committed) target = dx < 0 ? Math.min(idx+1, cells-1) : Math.max(idx-1, 0);
-
-      if(target !== idx){
-        state.swipeHintSeen = true;
-        const hint = document.getElementById('deckHint');
-        if(hint) hint.remove();
-        tick(8);
-      }
-      land(target);
-      x0=null; y0=null; axis=null; dx=0;
-    }, {passive:true});
-
-    deck.addEventListener('touchcancel', function(){
-      if(!dragging) return;
-      dragging = false; axis = null; dx = 0; x0 = null; y0 = null;
-      place(idx, true);
-    }, {passive:true});
-
-    /* The dots are a control, not just a readout. */
-    document.querySelectorAll('.deck-dots span').forEach(function(d, n){
-      d.onclick = function(){ if(n !== idx){ tick(6); land(n); } };
-    });
-  }
+  });
 }
 
 document.querySelectorAll('nav.tabs button').forEach(function(b){
