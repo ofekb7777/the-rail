@@ -976,6 +976,198 @@ try {
   });
   for (const m of harmonyUi) failures.push(`colour matching: ${m}`);
 
+  // Liking a look, and what a like is allowed to change.
+  //
+  // The heart teaches the app a *style*, not an outfit. It used to feed the
+  // pairing table too, at half the weight of having worn something -- that was
+  // measured across 48 pairs on four occasions, changed the deck 0 times out of
+  // 192, and was deleted rather than shipped as a button that does nothing.
+  // What survives is the part that moves: three likes of one colour rule and
+  // Automatic starts leading with it.
+  const likeMisses = await page.evaluate(async () => {
+    const missed = [];
+    const wasLikes = state.likes.slice();
+    const wasPref = state.harmony;
+    state.harmony = 'auto';
+    const OCC = ['work', 'casual', 'evening', 'sport'];
+
+    const rulesOver = () => {
+      const tally = {};
+      OCC.forEach((occasion) => {
+        generateLooks({ occasion, count: 5, padTo: 3 }).forEach((l) => {
+          if (l.harmonyRule) tally[l.harmonyRule] = (tally[l.harmonyRule] || 0) + 1;
+        });
+      });
+      return tally;
+    };
+
+    // Whether an outfit *works* is not a matter of taste, and the Stats counts
+    // are built on it. Same boundary the colour-matching picker has to respect.
+    const workable = () => {
+      let n = 0;
+      const tops = state.items.filter((i) => i.category === 'top');
+      const bottoms = state.items.filter((i) => i.category === 'bottom');
+      tops.forEach((t) => bottoms.forEach((b) => { if (comboWorks([t, b])) n++; }));
+      return n;
+    };
+
+    state.likes = [];
+    const before = rulesOver();
+    const workableBefore = workable();
+
+    // The rule to teach it is the least-offered one the wardrobe can actually
+    // make, so that a change is unmistakable -- picked from the fixture rather
+    // than named by hand, which is how an earlier version of this test came to
+    // assert something the fixture never produced.
+    const present = Object.keys(before).sort((a, b) => before[a] - before[b]);
+    if (!present.length) return ['the fixture produced no looks at all, so nothing here is tested'];
+    const rule = present[0];
+    if (present.length < 2) missed.push('the fixture only ever makes one colour rule, so leading with one is untestable');
+
+    // below the threshold it must do nothing: one tap is an accident
+    state.likes = [{ ids: ['a', 'b'], rule: rule, at: 1 }];
+    if (learnedHarmony()) missed.push('a single like already changed what the app leads with');
+    state.likes.push({ ids: ['c', 'd'], rule: rule, at: 2 });
+    if (learnedHarmony()) missed.push('two likes already changed what the app leads with');
+
+    state.likes.push({ ids: ['e', 'f'], rule: rule, at: 3 });
+    if (learnedHarmony() !== rule) {
+      missed.push(`three likes of ${rule} and the app leads with "${learnedHarmony()}"`);
+    }
+    const after = rulesOver();
+    if ((after[rule] || 0) <= (before[rule] || 0)) {
+      missed.push(`liking ${rule} did not offer more of it (${before[rule] || 0} -> ${after[rule] || 0})`);
+    }
+
+    // a dead heat must not make the app pick a side for you
+    state.likes = [
+      { ids: ['a', 'b'], rule: 'Monochrome', at: 1 }, { ids: ['c', 'd'], rule: 'Monochrome', at: 2 },
+      { ids: ['e', 'f'], rule: 'Monochrome', at: 3 }, { ids: ['g', 'h'], rule: 'Contrasting', at: 4 },
+      { ids: ['i', 'j'], rule: 'Contrasting', at: 5 }, { ids: ['k', 'l'], rule: 'Contrasting', at: 6 },
+    ];
+    if (learnedHarmony()) missed.push('a tie between two liked rules still picked one');
+
+    // saying it in Settings outranks the app inferring it from behaviour
+    state.likes = [
+      { ids: ['a', 'b'], rule: 'Monochrome', at: 1 }, { ids: ['c', 'd'], rule: 'Monochrome', at: 2 },
+      { ids: ['e', 'f'], rule: 'Monochrome', at: 3 },
+    ];
+    state.harmony = 'Complementary';
+    if (harmonyValue('Complementary') <= harmonyValue('Monochrome')) {
+      missed.push('a rule learned from likes outranked the one chosen in Settings');
+    }
+    state.harmony = 'auto';
+
+    // And none of it may move what counts as a workable outfit.
+    //
+    // On its own wardrobe this check could not fail. Run against a build with
+    // the leak deliberately opened, it passed -- the demo clothes contain no
+    // pairing weak enough for any rule to rescue, so lifting one pushes nothing
+    // over the bar. It needs a wardrobe with weak pairings in it, and it needs
+    // to say so out loud if it ever stops having them, rather than going quiet
+    // and looking like coverage.
+    const wasItems = state.items.slice();
+    const mk = (name, cat, color) => ({
+      id: 'lk' + name.replace(/\W/g, ''), name, category: cat, color,
+      warmth: 3, formality: 3, tags: [], image: null, createdAt: Date.now(),
+    });
+    state.items = [
+      mk('Blue shirt', 'top', 'blue'), mk('Orange tee', 'top', 'orange'),
+      mk('Grey knit', 'top', 'grey'), mk('Green shirt', 'top', 'green'),
+      mk('Charcoal trousers', 'bottom', 'charcoal'), mk('Blue jeans', 'bottom', 'blue'),
+      mk('Purple cords', 'bottom', 'purple'),
+      mk('Black boots', 'footwear', 'black'), mk('White trainers', 'footwear', 'white'),
+    ];
+    const rulesPresent = {};
+    for (let i = 0; i < state.items.length; i++) {
+      for (let j = i + 1; j < state.items.length; j++) {
+        rulesPresent[harmonyBetween(state.items[i].color, state.items[j].color).rule] = true;
+      }
+    }
+    if (!Object.keys(rulesPresent).some((r) => (HARMONY_SCORE[r] || 1) < 3.2)) {
+      missed.push('the fixture has no weak pairings, so a leak from likes into the counts could not show');
+    }
+    state.likes = [];
+    const countNoLikes = countGoodLooks(null);
+    let leaked = '';
+    HARMONY_RULES.forEach((r) => {
+      state.likes = [
+        { ids: ['a', 'b'], rule: r.v, at: 1 }, { ids: ['c', 'd'], rule: r.v, at: 2 },
+        { ids: ['e', 'f'], rule: r.v, at: 3 },
+      ];
+      const now = countGoodLooks(null);
+      if (now !== countNoLikes && !leaked) {
+        leaked = `liking ${r.v} changed the number of workable looks, ${countNoLikes} -> ${now}`;
+      }
+    });
+    if (leaked) missed.push(leaked);
+    state.items = wasItems;
+
+    // a malformed like -- a hand-edited backup, a future version -- is dropped
+    // rather than obeyed
+    if (validLikes([
+      { ids: ['a', 'b'], rule: 'Not A Real Rule' },
+      { ids: ['c'], rule: rule },
+      { rule: rule },
+      null,
+    ]).length !== 0) {
+      missed.push('a malformed like survived validation and can steer the ranker');
+    }
+
+    state.likes = wasLikes;
+    state.harmony = wasPref;
+    return [...new Set(missed)];
+  });
+  for (const m of likeMisses) failures.push(`liking a look: ${m}`);
+
+  // How many looks the deck offers. Five when the wardrobe can carry five, and
+  // fewer rather than five-with-repeats when it cannot: asking a six-piece
+  // wardrobe for five gets two real looks and three swapped belts.
+  const deckMisses = await page.evaluate(async () => {
+    const missed = [];
+    const wasItems = state.items.slice();
+    const OCC = ['work', 'casual', 'evening', 'sport'];
+
+    const nearDuplicates = (looks) => {
+      const sigs = looks.map((l) => l.itemIds.slice().sort());
+      let dup = 0;
+      for (let i = 0; i < sigs.length; i++) {
+        for (let j = 0; j < i; j++) {
+          const shared = sigs[i].filter((id) => sigs[j].indexOf(id) > -1).length;
+          if (shared >= Math.min(sigs[i].length, sigs[j].length) - 1) { dup++; break; }
+        }
+      }
+      return dup;
+    };
+
+    let total = 0, dups = 0;
+    OCC.forEach((occasion) => {
+      const looks = generateLooks({ occasion, count: 5, padTo: 3 });
+      total += looks.length;
+      dups += nearDuplicates(looks);
+    });
+    if (total !== OCC.length * 5) {
+      missed.push(`a full wardrobe offered ${total} looks over ${OCC.length} occasions, expected ${OCC.length * 5}`);
+    }
+    if (dups) missed.push(`${dups} of the looks offered were the same outfit with one piece swapped`);
+
+    // now starve it: three tops, two bottoms, one pair of shoes
+    state.items = [
+      ...wasItems.filter((i) => i.category === 'top').slice(0, 3),
+      ...wasItems.filter((i) => i.category === 'bottom').slice(0, 2),
+      ...wasItems.filter((i) => i.category === 'footwear').slice(0, 1),
+    ];
+    const small = generateLooks({ occasion: 'casual', count: 5, padTo: 3 });
+    if (small.length > 3) {
+      missed.push(`a six-piece wardrobe was padded to ${small.length} looks rather than stopping at 3`);
+    }
+    if (!small.length) missed.push('a six-piece wardrobe was offered nothing at all');
+
+    state.items = wasItems;
+    return [...new Set(missed)];
+  });
+  for (const m of deckMisses) failures.push(`how many looks: ${m}`);
+
   // How a gesture ends. Both the sheet and the deck used to judge a swipe by
   // its average speed -- total distance over total duration -- which gets the
   // one case that matters backwards: flick a sheet down, then hold still

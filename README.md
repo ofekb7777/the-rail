@@ -754,6 +754,71 @@ photographed. They are drawn on a transparent canvas at the moment you ask for
 them, so there is nothing to remove. Nothing a cut-out does can match that, and
 comparing against them is comparing against a picture that skipped the problem.
 
+## Liking a look
+
+Every look the stylist offers carries a **More like this** button next to *Save*.
+Tapping it teaches the app a *style*, not an outfit: each look is built on a
+colour relationship, and once you have liked three looks that share one,
+*Automatic* starts leading with it. The card says how far along you are — *"2
+more tonal looks liked and the app will lead with them"* — because a button that
+silently adjusts a ranker is indistinguishable from a button that does nothing.
+
+Tapping again takes it back. Measured on the demo wardrobe, liking three
+*Tonal* looks took the number of tonal looks offered across four occasions from
+**4 to 8 out of 20**.
+
+Three deliberate limits, each with a test:
+
+- **Three likes, not one.** One like is an accident and two is a coincidence. A
+  ranker that reshuffles itself around a single tap feels broken rather than
+  attentive.
+- **A tie picks nothing.** Three *Monochrome* and three *Contrasting* leaves it
+  on *Automatic*, rather than the app choosing a side you never chose.
+- **What you said beats what it guessed.** Picking a rule in
+  **Settings → Colour matching** outranks anything learned from likes.
+
+And the same boundary the picker has: a like never changes whether an outfit
+*works*, so the counts in *Stats* do not move when your taste does.
+
+### The half of it that did nothing
+
+Likes also fed the pairing table — the one that notices you keep wearing two
+things together — at half the weight of having actually worn them. It seemed
+obviously right: a like is evidence of the same kind as a wear, just weaker.
+
+Measured, a like moved a pair by a tenth of a point, one percentage point on
+screen. The deck's own gaps are 1, 0, 3 and 3 points, so the reasoning was that
+it would at least break a tie. Asked directly — every workable pair, liked, on
+four occasions — it changed the deck **0 times out of 192**. Looks showing the
+same percentage are not tied on the total underneath it.
+
+It is not coming back with the weight turned up, either. Pinning the exact
+outfit you liked to the top would fight the rotation score, which docks a look
+for having been worn recently *precisely so* that "what should I wear" stops
+answering with last Tuesday. Generalising a like to a style is the version that
+both works and belongs here.
+
+An aside worth keeping: measuring this turned up that **wearing** a pair scores
+it slightly *worse* (−0.08), because the rotation penalty outweighs the affinity
+bonus. That is the design working as intended, but it is not what you would
+guess from reading the two functions.
+
+## How many looks you are offered
+
+Three, before. Now up to **five** — but never five made up to the number.
+
+| wardrobe | five distinct looks? | weakest of the five |
+|---|---|---|
+| 6 pieces | **no** — only two per occasion are different | 47% |
+| 10 | yes | 55% |
+| 14 | yes | 71% |
+| 20 | yes | 74% (against 80% at three) |
+
+So the deck asks for five and takes fewer rather than padding: on six garments
+the extra cards came back as the same outfit with a swapped belt. Three real
+looks beat five with two apologies among them. Below three it still tops up,
+which is the behaviour that shipped before.
+
 ## Choosing what the stylist leads with
 
 The app describes every pair of colours by the relationship between them — nine

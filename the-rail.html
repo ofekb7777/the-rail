@@ -828,6 +828,26 @@
     padding:10px 16px; font-size:12.5px; font-weight:700; cursor:pointer;
   }
 
+  /* The like sits beside Save rather than under it: they are the same size of
+     decision -- keep this one, or ask for more like it -- and stacking them
+     would make the lighter of the two look like the bigger commitment. */
+  .like-row{display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;}
+  .like-row .save-outfit-btn{margin-top:0;}
+  .like-btn{
+    background:transparent; color:var(--bone); border:1px solid rgba(239,232,216,0.25);
+    border-radius:8px; padding:10px 14px; font-size:12.5px; font-weight:700; cursor:pointer;
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  .like-btn .heart{
+    font-size:14px; line-height:1; transition:transform .28s cubic-bezier(.2,.9,.3,1.4);
+  }
+  .like-btn.on{color:var(--thread); border-color:rgba(178,58,72,0.45);}
+  .like-btn.on .heart{transform:scale(1.22);}
+  .like-why{
+    font-size:11px; color:rgba(239,232,216,0.4); margin-top:8px; letter-spacing:0.3px;
+  }
+  @media (prefers-reduced-motion: reduce){ .like-btn .heart{transition:none;} }
+
   .loading-dots{display:inline-flex; gap:4px; align-items:center;}
   .loading-dots span{width:5px;height:5px;border-radius:50%;background:currentColor; animation:pulse 1.2s infinite ease-in-out;}
   .loading-dots span:nth-child(2){animation-delay:.15s;}
@@ -1187,7 +1207,7 @@ const COLORS = [
    published one is; the two together are how the app can tell you whether
    what you are looking at is current. Keep in step with version.json and the
    cache name in sw.js -- CI fails the build if they drift. */
-const APP_VERSION = '2026.09.11';
+const APP_VERSION = '2026.09.12';
 
 const OCCASIONS = ['Everyday','Work','Going out','Sport'];
 
@@ -1344,10 +1364,17 @@ const HARMONY_RULES = [
    Deliberately not used by comboWorks, which decides whether a look is workable
    at all and feeds the counts in Stats. Whether an outfit works is not a matter
    of taste, and "156 complete looks" must not change because a dropdown did. */
+const HARMONY_LEAD = 5.4;
+/* A rule you chose outranks one merely inferred from your likes, and it has to:
+   choosing in Settings is you saying it in words, while a like is the app
+   guessing from behaviour. When you have said nothing, the guess gets to speak
+   -- and it leads no harder than a deliberate choice would, so a taste the app
+   worked out for itself can never shout louder than one you stated. */
 function harmonyValue(rule){
   const base = HARMONY_SCORE[rule] || 1;
-  if(!state.harmony || state.harmony === 'auto') return base;
-  return rule === state.harmony ? Math.max(base, 5.4) : base;
+  const want = (state.harmony && state.harmony !== 'auto') ? state.harmony : learnedHarmony();
+  if(!want) return base;
+  return rule === want ? Math.max(base, HARMONY_LEAD) : base;
 }
 
 /* Whether the wardrobe can deliver what has been asked for. Choosing a rule your
@@ -1565,6 +1592,7 @@ function enrichItem(item){
 let state = {
   items: [],
   outfits: [],
+  likes: [],        /* [{ids, rule, at}]                     — looks you liked */
   wearLog: [],      /* [{date, itemIds, title}]              — what you wore */
   plans: {},        /* {'2026-07-28': {itemIds, title}}      — what you intend to wear */
   tab: 'today',
@@ -1680,6 +1708,7 @@ async function loadAll(){
   };
   state.items   = await readJson('wardrobe:items', []);
   state.outfits = await readJson('wardrobe:outfits', []);
+  state.likes   = await readJson('wardrobe:likes', []);
   state.wearLog = await readJson('wardrobe:wearlog', []);
   state.plans   = await readJson('wardrobe:plans', {});
   const prefs   = await readJson('wardrobe:prefs', {});
@@ -1696,6 +1725,7 @@ async function loadAll(){
       || HARMONY_RULES.some(function(r){ return r.v === prefs.harmony; }))){
     state.harmony = prefs.harmony;
   }
+  state.likes = validLikes(state.likes);
   try{ state.lastBackupAt = await storageGet('wardrobe:lastBackup'); }catch(e){}
 
   /* Wardrobes saved before warmth/formality existed get them inferred now.
@@ -1756,6 +1786,19 @@ async function saveKey(key, value){
 }
 function saveItems(){   return saveKey('wardrobe:items',   state.items); }
 function saveOutfits(){ return saveKey('wardrobe:outfits', state.outfits); }
+function saveLikes(){   return saveKey('wardrobe:likes',   state.likes); }
+
+/* Same care as the harmony pref, for the same reason: likes feed the ranker,
+   and a malformed entry -- from a hand-edited backup, or one written by a
+   future version -- would otherwise sit in the taste count forever, quietly
+   leading with a rule that does not exist. Both doors are checked: the wardrobe
+   read at startup and the one restored from a file. */
+function validLikes(list){
+  return (Array.isArray(list) ? list : []).filter(function(l){
+    return l && Array.isArray(l.ids) && l.ids.length >= 2
+      && (l.rule == null || HARMONY_RULES.some(function(r){ return r.v === l.rule; }));
+  });
+}
 function saveWearLog(){ return saveKey('wardrobe:wearlog', state.wearLog); }
 function savePlans(){   return saveKey('wardrobe:plans',   state.plans); }
 function savePrefs(){
@@ -1773,6 +1816,7 @@ function exportBackup(){
     app:'THE RAIL', version:2,
     exportedAt: new Date().toISOString(),
     items: state.items, outfits: state.outfits,
+    likes: state.likes,
     wearLog: state.wearLog, plans: state.plans,
     prefs: {temp: state.temp}
   };
@@ -1805,6 +1849,7 @@ async function importBackup(file, mode){
   if(mode==='replace'){
     state.items   = data.items;
     state.outfits = data.outfits || [];
+    state.likes   = validLikes(data.likes);
     state.wearLog = data.wearLog || [];
     state.plans   = data.plans || {};
   }else{
@@ -1812,6 +1857,11 @@ async function importBackup(file, mode){
     state.items.forEach(function(i){ seen[i.id] = true; });
     data.items.forEach(function(i){ if(!seen[i.id]) state.items.push(i); });
     (data.outfits||[]).forEach(function(o){ state.outfits.push(o); });
+    /* deduped on contents: merging a backup twice must not count one like
+       four times and hand the ranker a taste you never had */
+    validLikes(data.likes).forEach(function(l){
+      if(!likedAlready(l.ids)) state.likes.push(l);
+    });
     (data.wearLog||[]).forEach(function(w){ state.wearLog.push(w); });
     Object.keys(data.plans||{}).forEach(function(d){
       if(!state.plans[d]) state.plans[d] = data.plans[d];
@@ -1823,7 +1873,7 @@ async function importBackup(file, mode){
      on load has already run. */
   state.items.forEach(function(i){ i.category = normaliseCategory(i.category); });
   state.items.forEach(enrichItem);
-  await saveItems(); await saveOutfits(); await saveWearLog(); await savePlans(); await savePrefs();
+  await saveItems(); await saveOutfits(); await saveLikes(); await saveWearLog(); await savePlans(); await savePrefs();
 }
 
 /* confirm() can be blocked inside sandboxed frames — never let that
@@ -3033,6 +3083,45 @@ function pairAffinity(idA, idB){
   return _affinity[k] || 0;
 }
 
+/* What a like teaches: not "these two pieces" but "this kind of look". Every
+   liked outfit carries the colour relationship it was built on, and the one you
+   reach for most becomes what Automatic leads with.
+
+   Liked pairs were also fed into pairAffinity above, at half the weight of
+   having worn them. It was measured and deleted. A like moved a pair by a tenth
+   of a point -- one percentage point on screen -- and across 48 pairs on four
+   occasions it changed the deck 0 times out of 192. The reasoning that it would
+   at least break a tie was wrong: looks that show the same percentage are not
+   tied on the total underneath it.
+
+   It should not be revived by turning the weight up, either. Pinning the exact
+   outfit you liked to the top of the deck fights the rotation score, which
+   docks a look for being worn recently precisely so that "what should I wear"
+   does not keep answering with last Tuesday. Generalising the like to a style
+   is the version that both works and belongs here.
+
+   Three, before it acts. One like is an accident and two is a coincidence; a
+   ranker that reshapes itself around a single tap feels broken rather than
+   attentive. It also has to be a clear favourite -- ahead of the runner-up,
+   not tied with it -- or the app would pick a side you never picked. */
+function likeKey(ids){ return (ids||[]).slice().sort().join('|'); }
+function likedAlready(ids){
+  const k = likeKey(ids);
+  return state.likes.some(function(l){ return likeKey(l.ids) === k; });
+}
+
+const LIKES_BEFORE_LEADING = 3;
+function learnedHarmony(){
+  const tally = {};
+  state.likes.forEach(function(l){
+    if(l.rule) tally[l.rule] = (tally[l.rule]||0) + 1;
+  });
+  const ranked = Object.keys(tally).sort(function(a,b){ return tally[b]-tally[a]; });
+  if(!ranked.length || tally[ranked[0]] < LIKES_BEFORE_LEADING) return '';
+  if(ranked.length > 1 && tally[ranked[1]] >= tally[ranked[0]]) return '';
+  return ranked[0];
+}
+
 /* ============================================================
    THE STYLIST
    Everything below runs on your device in a few milliseconds.
@@ -3392,8 +3481,16 @@ function generateLooks(opts){
   }
   /* if the wardrobe is small there may not be enough variety — top up, but
      relaxing the similarity rule must not relax it all the way to letting the
-     identical outfit through twice */
-  for(let i=0; i<scored.length && chosen.length<want; i++){
+     identical outfit through twice
+
+     `padTo` is how far that relaxation is allowed to go, and the deck sets it
+     below `want` on purpose. Asking for five looks from six garments was
+     measured: only two per occasion are genuinely different, and the other
+     three came back as the same outfit with a swapped belt. Three real looks
+     beat five with two apologies among them, so the deck asks for five and
+     accepts fewer rather than padding to the number. */
+  const padTo = (opts && opts.padTo != null) ? Math.min(opts.padTo, want) : want;
+  for(let i=0; i<scored.length && chosen.length<padTo; i++){
     if(chosen.indexOf(scored[i]) > -1) continue;
     const sig = scored[i].items.map(function(x){ return x.id; }).sort().join('|');
     const dup = chosen.some(function(ch){
@@ -4481,6 +4578,35 @@ function colourExplainer(outfit){
     + escapeHtml(outfit.colorNote) + '</div></div>';
 }
 
+/* A class and a data attribute rather than an id: the deck builds every look,
+   not just the visible one, so this markup appears up to five times over. */
+function likeButton(outfit){
+  const on = likedAlready(outfit.itemIds);
+  return '<button class="like-btn'+(on?' on':'')+'" data-like="'+outfit.itemIds.join(',')+'" '
+    + 'data-like-rule="'+escapeHtml(outfit.harmonyRule||'')+'" '
+    + 'aria-pressed="'+(on?'true':'false')+'" '
+    + 'aria-label="'+(on?'Liked — tap to undo':'More looks like this')+'">'
+    + '<span class="heart">'+(on?'♥':'♡')+'</span>'
+    + (on ? 'Liked' : 'More like this')
+    + '</button>';
+}
+
+/* What a like has actually done, in a line. A button that silently adjusts a
+   ranker is indistinguishable from a button that does nothing, and the count
+   is the only honest way to say "not yet" during the first two taps. */
+function likeWhy(outfit){
+  if(!likedAlready(outfit.itemIds)) return '';
+  const lead = learnedHarmony();
+  if(lead) return '<div class="like-why">Leading with '+escapeHtml(lead.toLowerCase())+' looks, from what you have liked.</div>';
+  const rule = outfit.harmonyRule;
+  if(!rule) return '';
+  const n = state.likes.filter(function(l){ return l.rule === rule; }).length;
+  const left = LIKES_BEFORE_LEADING - n;
+  if(left <= 0) return '';
+  return '<div class="like-why">'+left+' more '+escapeHtml(rule.toLowerCase())
+    + ' look'+(left===1?'':'s')+' liked and the app will lead with them.</div>';
+}
+
 function renderOutfitResult(outfit, saved, savedIdx){
   let badge = '';
   if(outfit.harmonyRule){
@@ -4533,15 +4659,25 @@ function renderOutfitResult(outfit, saved, savedIdx){
     + badge
     + (pills ? '<div class="score-strip">'+pills+'</div>' : '')
     + colourExplainer(outfit)
+    /* The heart is on both branches on purpose. Saving flips the card to the
+       one below, and with the like only on the other you could like a look,
+       save it, and watch the heart vanish -- the like still stored, nothing on
+       screen saying so and no way left to take it back. */
     + (saved || outfit.__saved
         ? '<div class="saved-flag">✓ Saved to your looks</div>'
+          + '<div class="like-row">'+likeButton(outfit)+'</div>'
+          + likeWhy(outfit)
           + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>'
           + (savedIdx !== undefined
               ? '<button class="wore-btn danger" data-unsave="'+savedIdx+'" data-unsave-ids="'+outfit.itemIds.join(',')+'">Remove</button>'
               : '')
-        : '<button class="save-outfit-btn">Save this look</button>'
-          + '<button class="wore-btn" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
+        : '<div class="like-row">'
+          +   '<button class="save-outfit-btn">Save this look</button>'
+          +   likeButton(outfit)
+          + '</div>'
+          + likeWhy(outfit)
+          + '<button class="wore-btn" style="margin-left:0;" data-wore="'+outfit.itemIds.join(',')+'" data-wore-title="'+escapeHtml(outfit.title||'')+'">I\'m wearing this</button>'
           + '<button class="wore-btn" data-plan-look="'+outfit.itemIds.join(',')+'" data-plan-title="'+escapeHtml(outfit.title||'')+'">Plan for a day</button>')
     + '</div>';
 }
@@ -5756,7 +5892,11 @@ function openDetail(id){
     releaseImg(id);
     state.items = state.items.filter(function(i){ return i.id!==id; });
     if(state.anchorId===id) state.anchorId = null;
-    await saveItems();
+    /* A like is about a whole look, so once one of its pieces is gone the like
+       no longer describes anything you own -- and left in place it would go on
+       tilting the ranker on behalf of a garment you threw away. */
+    state.likes = state.likes.filter(function(l){ return (l.ids||[]).indexOf(id) < 0; });
+    await saveItems(); await saveLikes();
     detailOverlay.classList.remove('open');
     render();
     toast('Removed');
@@ -7430,8 +7570,13 @@ async function removeDemoWardrobe(){
   Object.keys(state.plans).forEach(function(k){
     if((state.plans[k].itemIds||[]).some(function(id){ return ids[id]; })) delete state.plans[k];
   });
+  /* Otherwise the taste learned from demo clothes outlives the clothes, and a
+     wardrobe of your own opens already leaning a way you never asked for. */
+  state.likes = state.likes.filter(function(l){
+    return !(l.ids||[]).some(function(id){ return ids[id]; });
+  });
   clearImgCache();
-  await saveItems(); await saveWearLog(); await saveOutfits(); await savePlans();
+  await saveItems(); await saveWearLog(); await saveOutfits(); await saveLikes(); await savePlans();
   render();
   toast('Demo pieces removed');
 }
@@ -7972,7 +8117,7 @@ function attachDynamicHandlers(){
     await new Promise(function(r){ requestAnimationFrame(function(){ setTimeout(r, 0); }); });
 
     let looks = [];
-    try{ looks = generateLooks({count:3}); }
+    try{ looks = generateLooks({count:5, padTo:3}); }
     catch(e){ console.error('generate failed', e); }
 
     if(!looks.length){
@@ -8002,6 +8147,31 @@ function attachDynamicHandlers(){
     render();
     toast('Look saved');
   }
+
+  /* Liking reads the ids off the button rather than off state.activeOption.
+     The deck holds five cards and a tap lands on the one under the thumb,
+     which is not necessarily the one the deck thinks is centred mid-swipe. */
+  document.querySelectorAll('.like-btn').forEach(function(btn){
+    btn.onclick = async function(){
+      const ids = (btn.getAttribute('data-like')||'').split(',').filter(Boolean);
+      if(ids.length < 2) return;
+      const rule = btn.getAttribute('data-like-rule') || null;
+      const k = likeKey(ids);
+      const was = likedAlready(ids);
+      /* A second tap takes it back. A preference you cannot withdraw is a trap,
+         and this one quietly steers everything you are shown afterwards. */
+      if(was){
+        state.likes = state.likes.filter(function(l){ return likeKey(l.ids) !== k; });
+      }else{
+        state.likes.push({ids: ids.slice(), rule: rule || null, at: Date.now()});
+      }
+      await saveLikes();
+      const lead = learnedHarmony();
+      render();
+      toast(was ? 'Like removed'
+        : (lead ? 'Leading with ' + lead.toLowerCase() + ' looks' : 'Noted — more looks like this'));
+    };
+  });
 
   /* --- calendar --- */
   on('calPrev', function(){ shiftMonth(-1); });
